@@ -195,6 +195,23 @@ Read-only calendar, payroll-document, travel-itinerary, and shared-money evidenc
 
 Receipts, warranties, leases, insurance policies, financing agreements, memberships, and maintenance records may form an asset and obligation ledger. Meridian tracks return windows, warranty expirations, renewal dates, escalation clauses, deductibles, cancellation windows, maintenance intervals, and replacement reserves. Medical financial documents may be reconciled as bills and payments, but Meridian must not make medical, legal, coverage, or tax determinations.
 
+### Connected Billers
+
+Connected Billers is the final roadmap priority and builds on the completed Commitment, document, transaction, and evidence layers. It is a capability inside a Commitment, not a separate primary workspace or provider-branded module.
+
+A biller connection exposes an explicit capability ladder:
+
+1. **Monitor:** retrieve the current amount due, due date, statement, autopay state, payment history, plan changes, provenance, freshness, and connection health.
+2. **Switch:** after owner approval, update the biller's stored payment method to a user-selected linked account or card through a vetted switching partner.
+3. **Pay:** after owner approval, schedule or initiate a one-time or recurring payment through a regulated bill-payment partner.
+4. **Meridian bill account:** consider an optional partner-backed household bill-pay account only after the first three capabilities demonstrate demand, reliability, and an acceptable regulatory and support posture.
+
+Monitoring may synchronize automatically after source-specific authorization. Switching, scheduling, paying, or reversing a switch is a financial mutation and must use the existing explain-propose-approve-execute-verify pipeline. Mutations receive idempotency keys, execute once, and remain pending when their outcome is uncertain; they are never retried automatically. Meridian must verify the resulting biller state and warn about transition-period duplicate charges.
+
+Authentication occurs in OAuth or partner-hosted interfaces. Meridian never stores raw biller passwords or exposes partner tokens to the browser, AI prompts, logs, or fixtures. Merchant coverage and capability vary, so every Commitment displays supported actions and provides a guided manual fallback without pretending the connection succeeded.
+
+The interface remains provider-neutral. Today surfaces exceptions, Plan reflects verified amounts and funding pressure, Activity records proposals and confirmed changes, and the Commitment inspector holds statements, connection state, payment method, and audit history.
+
 ## Visual language
 
 The emotional foundation is **Editorial Wealth**, supported by **Quiet Precision**.
@@ -257,7 +274,7 @@ The current monolithic backend and overlapping front-end modules are changed inc
 - build reusable UI primitives and workspace components rather than adding another global CSS override layer;
 - migrate one vertical slice at a time while compatibility adapters keep existing data usable.
 
-The first production slice should establish the shell, tokens, responsive navigation, normalized read model, and transaction detail inspector. The second should add Commitments and schedules. The third should add unified provider ingestion and transaction intelligence. The fourth should complete Beacon scenarios, contextual AI, migration cleanup, and removal of obsolete surfaces. The fifth should add Document Intelligence and reconciliation. The sixth should add opt-in Life Context. The seventh should add Asset and Contract Memory.
+The first production slice should establish the shell, tokens, responsive navigation, normalized read model, and transaction detail inspector. The second should add Commitments and schedules. The third should add unified provider ingestion and transaction intelligence. The fourth should complete Beacon scenarios, contextual AI, migration cleanup, and removal of obsolete surfaces. The fifth should add Document Intelligence and reconciliation. The sixth should add opt-in Life Context. The seventh should add Asset and Contract Memory. The eighth and final-priority slice should add Connected Billers in monitor, switch, pay, and optional partner-backed-account stages.
 
 ## Verification and acceptance criteria
 
@@ -281,3 +298,8 @@ The redesign is accepted when:
 16. Bill, charge, payment, receipt, and contract evidence can be linked without double-counting financial activity.
 17. Calendar and life-context evidence influences scenarios only with visible assumptions and confidence.
 18. Asset and contract facts remain traceable to source documents and never become medical, legal, coverage, or tax advice.
+19. Connected billers remain part of Commitments and do not add a fifth primary navigation item.
+20. Monitoring exposes source, freshness, authorization, capability, and connection-health state.
+21. Switching and payment actions require explanation, explicit owner approval, single-attempt execution, and post-action verification.
+22. Biller credentials and partner tokens never enter browser payloads, AI prompts, logs, or fixtures.
+23. Unsupported billers and uncertain outcomes provide honest manual or verification paths rather than false success.

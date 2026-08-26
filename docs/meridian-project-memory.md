@@ -37,6 +37,7 @@ Meridian's long-term differentiator is a Financial Evidence Graph connecting:
 - Shared obligations and reimbursements
 - Payroll, calendar, and travel signals
 - Contracts, warranties, renewals, and maintenance
+- Direct biller monitoring, approved payment-method switching, and partner-mediated bill payment as the final roadmap priority
 - Provider provenance, freshness, external identifiers, and confidence
 - User corrections and deterministic rules
 
@@ -53,6 +54,8 @@ The approved implementation plan contains 26 tasks across seven slices:
 5. Document Intelligence
 6. Life Context
 7. Asset and Contract Memory
+
+An approved eighth and final-priority slice, Connected Billers, will be appended to the implementation plan after written-spec review. It progresses from read-only monitoring to approved payment-method switching, then regulated partner-mediated payment. A partner-backed Meridian bill account remains optional and contingent on validated demand.
 
 The implementation uses versioned, non-destructive SQLite migrations, stable `/api/meridian/*` read models, compatibility adapters, vanilla ES2020 modules, Flask, pytest, Playwright, Docker, and GitHub Actions. New business logic must not be added to the existing monolithic `app.py`.
 
@@ -103,4 +106,3 @@ Because AI assisted development, preserve evidence of human direction, selection
 - Existing migrations remain non-destructive, versioned, idempotent, and resumable.
 - Every normalized record retains provenance, freshness, and external identifiers.
 - Every task requires implementation, tests, independent review, and explicit completion evidence.
-
