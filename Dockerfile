@@ -20,5 +20,5 @@ ENV DB_FILE=/app/data/savings_data.db
 # Expose the port Flask runs on
 EXPOSE 8080
 
-# Run the application
-CMD ["python", "app.py"]
+# Run the application with a production WSGI server
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "app:app"]
