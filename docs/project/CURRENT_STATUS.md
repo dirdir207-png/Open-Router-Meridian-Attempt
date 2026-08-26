@@ -1,6 +1,6 @@
 # Enhanced SimpleCrew — Current Status
 
-Last consolidated: 2026-08-25 (Milestone 2 implementation)
+Last consolidated: 2026-08-26 (Ox Alpha Meridian implementation)
 
 ## Canonical sources
 
@@ -8,6 +8,9 @@ Last consolidated: 2026-08-25 (Milestone 2 implementation)
 - Default branch: `main` (protected; do not work directly on it)
 - Approved design: bundle artifact `Enhanced_SimpleCrew_Design_Spec` / `2026-08-24-hybrid-gateway-foundation-design.md`
 - Milestone 2 design: `docs/designs/2026-08-25-guided-credential-renewal.md`
+- Meridian design: `docs/superpowers/specs/2026-08-26-meridian-product-overhaul-design.md`
+- Meridian implementation plan: `docs/superpowers/plans/2026-08-26-meridian-overhaul-implementation.md`
+- Ox Alpha implementation branch: `ox-alpha/meridian-overhaul`
 - Approved specifications override informal chat history when they conflict.
 
 ## Architecture and safety decisions
@@ -20,6 +23,13 @@ Last consolidated: 2026-08-25 (Milestone 2 implementation)
 - Financial mutations must never be retried automatically; uncertain transfer outcomes surface as `uncertain_write` / verify-state.
 
 ## Milestone status
+
+### Meridian Slice 1 — quality and production foundation: IN PROGRESS (Ox Alpha branch)
+
+- Separate branch/workspace created: `ox-alpha/meridian-overhaul`.
+- Production launch is being separated from development: secure cookie defaults, `FLASK_DEBUG=1` opt-in, and Gunicorn Docker entrypoint.
+- Developer tooling is isolated in `requirements-dev.txt`; CI workflow added for lint, tests, dependency audit, and Docker build.
+- Next task: add the Meridian normalized read model and the independent Today/Plan/Activity/Accounts shell. No legacy route or deployment is being replaced yet.
 
 ### Milestone 1 — Hybrid Gateway Foundation: COMPLETE (merged PR #2, hardening PR #3)
 

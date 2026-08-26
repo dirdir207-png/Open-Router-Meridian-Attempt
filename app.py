@@ -33,6 +33,9 @@ from webauthn.helpers.cose import COSEAlgorithmIdentifier
 
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', '0') == '1'
 
 @app.after_request
 def _no_store_critical(response):
@@ -8045,4 +8048,4 @@ if __name__ == '__main__':
     init_db()
     print("Server running on http://127.0.0.1:8080")
     # Background thread will start automatically on first request
-    app.run(host='0.0.0.0', debug=True, port=8080)
+    app.run(host='0.0.0.0', debug=os.environ.get('FLASK_DEBUG') == '1', port=8080)

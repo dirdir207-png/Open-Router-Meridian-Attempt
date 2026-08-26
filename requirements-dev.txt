@@ -1,0 +1,4 @@
+pytest
+playwright
+ruff
+pip-audit

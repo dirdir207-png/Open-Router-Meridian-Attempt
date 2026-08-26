@@ -21,4 +21,4 @@ ENV DB_FILE=/app/data/savings_data.db
 EXPOSE 8080
 
 # Run the application
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "app:app"]
