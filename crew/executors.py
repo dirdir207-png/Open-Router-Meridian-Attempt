@@ -6,6 +6,7 @@ execution. Executors inherit the safety semantics of the functions they wrap
 (e.g., move_money's no-retry / uncertain-write contract).
 """
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -32,16 +33,9 @@ def execute_approved_action(
     store: ActionStore,
     request_id: str,
     executors: Dict[str, ExecutorSpec],
+    execution_key: Optional[str] = None,
 ) -> Dict[str, Any]:
-    request = store.get(request_id)
-    if not request:
-        from .actions import IllegalTransitionError
-
-        raise IllegalTransitionError("Unknown action request")
-    if request["state"] != ActionState.APPROVED.value:
-        from .actions import IllegalTransitionError
-
-        raise IllegalTransitionError(f"Action is not approved (state={request['state']})")
+    request = store.claim_for_execution(request_id, execution_key or uuid.uuid4().hex)
 
     spec = executors.get(request["type"])
     if spec is None:

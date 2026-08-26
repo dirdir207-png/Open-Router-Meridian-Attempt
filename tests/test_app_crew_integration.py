@@ -230,6 +230,12 @@ def test_action_pipeline_full_lifecycle_over_http(authenticated_client, action_e
     body = executed.get_json()
     assert body["state"] == "verified"
     assert body["verification"]["ok"] is True
+    assert body["execution_key"]
+    assert body["execution_started_at"]
+    assert calls == [{"from_id": "a", "to_id": "b", "amount": 5}]
+
+    repeated = authenticated_client.post(f"/api/actions/{action_id}/execute")
+    assert repeated.status_code == 409
     assert calls == [{"from_id": "a", "to_id": "b", "amount": 5}]
 
     pending = authenticated_client.get("/api/actions/pending")

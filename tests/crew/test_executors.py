@@ -1,3 +1,6 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from crew.actions import ActionState, ActionStore, IllegalTransitionError
@@ -34,8 +37,14 @@ def test_approved_action_executes_and_verifies(store):
         return {"ok": True, "checked": "transfer-id-present"}
 
     action_id = seed_approved_action(store)
-    final = execute_approved_action(store, action_id, make_executors(verifier=verifier))
+    final = execute_approved_action(
+        store,
+        action_id,
+        make_executors(verifier=verifier),
+        execution_key="execute-once-key",
+    )
     assert final["state"] == ActionState.VERIFIED.value
+    assert final["execution_key"] == "execute-once-key"
     assert final["result"]["result"]["id"] == "tx-1"
     assert final["verification"]["ok"] is True
     assert verifications[0][0] == {"amount": 100}
@@ -54,6 +63,7 @@ def test_error_contract_lands_in_failed_without_verification(store):
     final = execute_approved_action(store, action_id, make_executors(fn=executor, verifier=verifier))
     assert final["state"] == ActionState.FAILED.value
     assert final["result"]["error_code"] == "uncertain_write"
+    assert final["result"]["verify_state"] is True
     assert calls == []
 
 
@@ -89,6 +99,42 @@ def test_failed_verification_overrides_success(store):
     )
     assert final["state"] == ActionState.FAILED.value
     assert final["result"]["verification"]["reason"] == "balance unchanged"
+
+
+def test_concurrent_execution_claims_action_once(store):
+    start = threading.Barrier(2)
+    executor_calls = []
+    executor_calls_lock = threading.Lock()
+    concurrent_executor_calls = threading.Barrier(2)
+
+    def executor(params):
+        with executor_calls_lock:
+            executor_calls.append(params)
+        try:
+            concurrent_executor_calls.wait(timeout=0.5)
+        except threading.BrokenBarrierError:
+            pass
+        return {"success": True, "result": {"id": "tx-concurrent"}}
+
+    action_id = seed_approved_action(store)
+
+    def execute():
+        start.wait()
+        try:
+            return execute_approved_action(store, action_id, make_executors(fn=executor))
+        except IllegalTransitionError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: execute(), range(2)))
+
+    assert len(executor_calls) == 1
+    conflicts = [result for result in results if isinstance(result, IllegalTransitionError)]
+    terminal_results = [result for result in results if isinstance(result, dict)]
+    assert len(conflicts) == 1
+    assert str(conflicts[0]) == "Action is not available for execution"
+    assert len(terminal_results) == 1
+    assert terminal_results[0]["state"] == ActionState.VERIFIED.value
 
 
 def test_stale_approvals_expire_recent_ones_survive(store, monkeypatch):

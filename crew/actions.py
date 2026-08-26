@@ -25,6 +25,7 @@ class IllegalTransitionError(RuntimeError):
 class ActionState(str, Enum):
     PROPOSED = "proposed"
     APPROVED = "approved"
+    EXECUTING = "executing"
     EXECUTED = "executed"
     VERIFIED = "verified"
     REJECTED = "rejected"
@@ -37,7 +38,8 @@ _TERMINAL_STATES = {ActionState.REJECTED, ActionState.EXPIRED, ActionState.VERIF
 # from-state -> allowed target states with the column to stamp on success
 _TRANSITIONS = {
     ActionState.PROPOSED: {ActionState.APPROVED, ActionState.REJECTED},
-    ActionState.APPROVED: {ActionState.EXECUTED, ActionState.EXPIRED, ActionState.FAILED},
+    ActionState.APPROVED: {ActionState.EXECUTING, ActionState.EXPIRED},
+    ActionState.EXECUTING: {ActionState.EXECUTED, ActionState.FAILED},
     ActionState.EXECUTED: {ActionState.VERIFIED, ActionState.FAILED},
 }
 
@@ -53,11 +55,24 @@ CREATE TABLE IF NOT EXISTS action_requests (
     created_at TEXT NOT NULL,
     decided_by TEXT,
     decided_at TEXT,
+    execution_key TEXT,
+    execution_started_at TEXT,
     executed_at TEXT,
     result_json TEXT,
     verification_json TEXT
 )
 """
+
+_SELECT_COLUMNS = (
+    "id, type, params_json, rationale, requested_by, state, created_at, "
+    "decided_by, decided_at, execution_key, execution_started_at, executed_at, "
+    "result_json, verification_json"
+)
+
+_EXECUTION_COLUMNS = {
+    "execution_key": "TEXT",
+    "execution_started_at": "TEXT",
+}
 
 
 def _now() -> str:
@@ -70,6 +85,10 @@ class ActionStore:
         self._allowed_types = frozenset(allowed_types)
         with self._connect() as conn:
             conn.execute(_SCHEMA)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(action_requests)")}
+            for column, column_type in _EXECUTION_COLUMNS.items():
+                if column not in columns:
+                    conn.execute(f"ALTER TABLE action_requests ADD COLUMN {column} {column_type}")
 
     def __repr__(self) -> str:
         return "ActionStore()"
@@ -100,9 +119,7 @@ class ActionStore:
     def get(self, request_id: str) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, type, params_json, rationale, requested_by, state, created_at, "
-                "decided_by, decided_at, executed_at, result_json, verification_json "
-                "FROM action_requests WHERE id = ?",
+                f"SELECT {_SELECT_COLUMNS} FROM action_requests WHERE id = ?",
                 (request_id,),
             ).fetchone()
         return self._row_to_dict(row) if row else None
@@ -113,9 +130,8 @@ class ActionStore:
     def list_by_state(self, state: ActionState) -> list:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, type, params_json, rationale, requested_by, state, created_at, "
-                "decided_by, decided_at, executed_at, result_json, verification_json "
-                "FROM action_requests WHERE state = ? ORDER BY created_at DESC",
+                f"SELECT {_SELECT_COLUMNS} FROM action_requests "
+                "WHERE state = ? ORDER BY created_at DESC",
                 (state.value,),
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
@@ -129,6 +145,23 @@ class ActionStore:
 
     def expire(self, request_id: str) -> Dict[str, Any]:
         return self._transition(request_id, ActionState.EXPIRED)
+
+    def claim_for_execution(self, request_id: str, execution_key: str) -> Dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            updated = conn.execute(
+                "UPDATE action_requests SET state=?, execution_key=?, execution_started_at=? "
+                "WHERE id=? AND state=?",
+                ("executing", execution_key, _now(), request_id, "approved"),
+            )
+            if updated.rowcount != 1:
+                raise IllegalTransitionError("Action is not available for execution")
+            row = conn.execute(
+                f"SELECT {_SELECT_COLUMNS} FROM action_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+        assert row is not None
+        return self._row_to_dict(row)
 
     def mark_executed(self, request_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
         return self._transition(request_id, ActionState.EXECUTED, payload_json=json.dumps(result or {}))
@@ -191,17 +224,18 @@ class ActionStore:
             "created_at": row[6],
             "decided_by": row[7],
             "decided_at": row[8],
-            "executed_at": row[9],
-            "result": json.loads(row[10]) if row[10] else None,
-            "verification": json.loads(row[11]) if row[11] else None,
+            "execution_key": row[9],
+            "execution_started_at": row[10],
+            "executed_at": row[11],
+            "result": json.loads(row[12]) if row[12] else None,
+            "verification": json.loads(row[13]) if row[13] else None,
         }
 
     def _list_by_state(self, state: ActionState) -> list:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, type, params_json, rationale, requested_by, state, created_at, "
-                "decided_by, decided_at, executed_at, result_json, verification_json "
-                "FROM action_requests WHERE state = ? ORDER BY created_at DESC",
+                f"SELECT {_SELECT_COLUMNS} FROM action_requests "
+                "WHERE state = ? ORDER BY created_at DESC",
                 (state.value,),
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
