@@ -60,5 +60,9 @@ Thumbs.db
 # pytest
 .pytest_cache/
 
+# Agent workspaces and visual-design scratch
+.worktrees/
+.superpowers/
+
 # Deployment config is machine-local (untracked by design)
 docker-compose.yml
