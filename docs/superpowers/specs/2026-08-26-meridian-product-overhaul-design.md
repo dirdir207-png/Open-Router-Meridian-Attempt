@@ -175,6 +175,26 @@ AI capabilities include:
 
 AI must not use generic encouragement as a substitute for analysis. Each recommendation should state the observed facts, calculation or pattern, confidence, and likely effect. The system stores model/provider metadata for audit without exposing credentials.
 
+## Financial evidence graph
+
+Meridian connects financial facts across transactions, documents, schedules, messages, and real-world events. Evidence is stored separately from conclusions so every link can be inspected, corrected, expired, or removed without rewriting the source record.
+
+Each evidence item includes source type, source identifier, captured timestamp, effective date, extracted facts, linked financial objects, confidence, provenance, retention policy, and user corrections. Each connection is individually opt-in and read-only. Meridian never sends email, deletes messages, modifies calendars, or acts on external systems through an evidence connection.
+
+### Document Intelligence
+
+Authorized Gmail access and a dedicated forwarding address ingest financial email and supported attachments. Meridian detects bills, statements, receipts, renewal notices, pay stubs, contracts, and payment confirmations. PDF and image extraction captures merchant, amount, due date, billing period, masked account reference, line items, renewal terms, and source evidence.
+
+Documents link to Commitments and transactions. Meridian reconciles bill-to-charge-to-payment chains, detects duplicates, price increases, late fees, missing expected bills, and mismatched totals, and attaches the original document to the relevant detail surface. Unsupported, encrypted, oversized, suspicious, or low-confidence files enter Review. Attachments are type-checked, size-limited, malware-scanned, hashed for deduplication, encrypted at rest, and governed by explicit retention controls. Deterministic extraction runs before AI interpretation.
+
+### Life Context
+
+Read-only calendar, payroll-document, travel-itinerary, and shared-money evidence may enrich forecasts. Meridian can anticipate dated spending pressure, verify deposits against pay stubs, create temporary trip scenarios, and reconcile reimbursements. It describes correlations without claiming causation and never treats a calendar event as a known expense without financial evidence or user confirmation.
+
+### Asset and Contract Memory
+
+Receipts, warranties, leases, insurance policies, financing agreements, memberships, and maintenance records may form an asset and obligation ledger. Meridian tracks return windows, warranty expirations, renewal dates, escalation clauses, deductibles, cancellation windows, maintenance intervals, and replacement reserves. Medical financial documents may be reconciled as bills and payments, but Meridian must not make medical, legal, coverage, or tax determinations.
+
 ## Visual language
 
 The emotional foundation is **Editorial Wealth**, supported by **Quiet Precision**.
@@ -237,7 +257,7 @@ The current monolithic backend and overlapping front-end modules are changed inc
 - build reusable UI primitives and workspace components rather than adding another global CSS override layer;
 - migrate one vertical slice at a time while compatibility adapters keep existing data usable.
 
-The first production slice should establish the shell, tokens, responsive navigation, normalized read model, and transaction detail inspector. The second should add Commitments and schedules. The third should add unified provider ingestion and transaction intelligence. The fourth should complete Beacon scenarios, contextual AI, migration cleanup, and removal of obsolete surfaces.
+The first production slice should establish the shell, tokens, responsive navigation, normalized read model, and transaction detail inspector. The second should add Commitments and schedules. The third should add unified provider ingestion and transaction intelligence. The fourth should complete Beacon scenarios, contextual AI, migration cleanup, and removal of obsolete surfaces. The fifth should add Document Intelligence and reconciliation. The sixth should add opt-in Life Context. The seventh should add Asset and Contract Memory.
 
 ## Verification and acceptance criteria
 
@@ -257,3 +277,7 @@ The redesign is accepted when:
 12. Unit, integration, migration, API, browser, and responsive smoke tests run in CI.
 13. Existing Crew credential and mutation-safety boundaries remain intact.
 14. Legacy duplicated views are removed only after migrated workflows pass parity checks.
+15. Email and document connections are read-only, individually revocable, and governed by retention controls.
+16. Bill, charge, payment, receipt, and contract evidence can be linked without double-counting financial activity.
+17. Calendar and life-context evidence influences scenarios only with visible assumptions and confidence.
+18. Asset and contract facts remain traceable to source documents and never become medical, legal, coverage, or tax advice.

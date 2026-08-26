@@ -23,7 +23,7 @@ Sources:
 
 ## Build estimate
 
-The 20-task Meridian plan is a multi-slice rebuild touching domain modeling, migrations, provider normalization, financial invariants, AI, and two responsive UI compositions. A disciplined implementation should budget:
+The 26-task Meridian plan is a seven-slice rebuild touching domain modeling, migrations, provider normalization, financial invariants, AI, two responsive UI compositions, read-only evidence connectors, document extraction, and cross-media reasoning. A disciplined implementation should budget:
 
 | Slice | Input tokens | Output/reasoning tokens | Main cost drivers |
 |---|---:|---:|---|
@@ -31,9 +31,12 @@ The 20-task Meridian plan is a multi-slice rebuild touching domain modeling, mig
 | 2. Commitments and funding | 4–7M | 0.6–1.1M | Schema/migration reasoning, calculation tests, schedule UI |
 | 3. Providers and transaction AI | 5–9M | 0.8–1.4M | Provider edge cases, reconciliation, classification, review UX |
 | 4. Advanced intelligence | 4–7M | 0.6–1.2M | Forecast/scenarios, grounded advisor, parity audit, legacy removal |
-| **Total expected** | **17–30M** | **2.6–4.8M** | Includes implementation, tool output, tests, and review rounds |
+| 5. Document Intelligence | 4–7M | 0.7–1.2M | Encrypted evidence, email ingestion, attachment safety, extraction, reconciliation |
+| 6. Life Context | 2–4M | 0.3–0.6M | Calendar/privacy boundary, contextual assumptions, scenario integration |
+| 7. Asset and Contract Memory | 3–5M | 0.4–0.8M | Evidence-backed lifecycle model, advisory boundaries, cross-workspace UI |
+| **Total expected** | **26–46M** | **4.0–7.4M** | Includes implementation, tool output, tests, and review rounds |
 
-At a quality-first mix of 20% Sol, 65% Terra, and 15% Luna, this is approximately **$70–$150 in direct API-equivalent token cost**. Allow **$200 as the sensible ceiling** for unexpected debugging and re-review. A single-model Sol strategy could cost roughly two to three times more without proportionally improving mechanical tasks. Rework from weak unsupervised output can cost more than either strategy, so the plan does not use a bargain-only path.
+At a quality-first mix of 20% Sol, 65% Terra, and 15% Luna, this is approximately **$105–$190 in direct API-equivalent token cost**. Allow **$300 as the sensible ceiling** for unexpected document-parser, provider, security, and re-review work. A single-model Sol strategy could cost roughly two to three times more without proportionally improving mechanical tasks. Rework from weak unsupervised output can cost more than either strategy, so the plan does not use a bargain-only path.
 
 ## Routing rules
 

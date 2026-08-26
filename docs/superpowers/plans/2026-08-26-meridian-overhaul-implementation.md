@@ -28,6 +28,9 @@
 2. **Slice 2 — Commitments and funding:** typed Commitment model, migration review, funding rules, Plan views, schedule proposals, and core Beacon coverage.
 3. **Slice 3 — Unified providers and transaction intelligence:** adapter normalization, reconciliation, deterministic rules, AI assignments, review workflow, and correction learning.
 4. **Slice 4 — Advanced intelligence and consolidation:** scenarios, contextual advisor, richer forecasts, complete responsive parity, legacy removal, and production hardening.
+5. **Slice 5 — Document Intelligence:** evidence storage, read-only email ingestion, safe document extraction, and bill/charge/payment reconciliation.
+6. **Slice 6 — Life Context:** opt-in calendar, payroll, travel, and shared-money evidence feeding explicit forecast assumptions.
+7. **Slice 7 — Asset and Contract Memory:** receipts, warranties, contracts, renewals, maintenance, and long-horizon reserves.
 
 ---
 
@@ -882,6 +885,253 @@ git add -- templates static/js static/css tests/test_legacy_redirects.py docs/ME
 git commit -m "refactor: complete Meridian workspace migration"
 ```
 
-- [ ] **Final release gate**
+- [ ] **Slice 4 release gate**
 
 Run the complete CI workflow against a sanitized production-data copy, then perform an owner-observed read-only verification against current Crew and outside-account data. Verify transaction totals, owned transfers, credit payments, Splitwise balances, Commitment migration, forecast explanations, mobile parity, and proposal-only mutation behavior before enabling Meridian as the default route.
+
+---
+
+## Slice 5 — Document Intelligence
+
+### Task 21: Add encrypted evidence storage and retention
+
+**Files:**
+- Create: `meridian/evidence.py`
+- Create: `meridian/migrations/005_evidence_graph.sql`
+- Create: `meridian/storage.py`
+- Create: `tests/meridian/test_evidence.py`
+- Create: `tests/meridian/test_storage.py`
+
+**Interfaces:**
+- Produces: `EvidenceItem`, `EvidenceLink`, `EvidenceRepository`, `EncryptedBlobStore.put/read/delete`, and retention sweeps that preserve audit metadata while deleting expired blobs.
+
+- [ ] **Step 1: Write evidence, encryption, deduplication, and retention tests**
+
+Assert identical hashes reuse one encrypted blob, plaintext never appears on disk, links retain provenance, revoked-source items become inaccessible, and expiration deletes content without corrupting financial records.
+
+- [ ] **Step 2: Run tests and confirm missing-module failures**
+
+Run: `pytest tests/meridian/test_evidence.py tests/meridian/test_storage.py -q`
+
+- [ ] **Step 3: Implement the evidence graph and blob boundary**
+
+Use per-installation envelope encryption backed by a server-side key, SHA-256 content identities, parameterized SQLite operations, explicit MIME/size metadata, and source-scoped revocation. No provider credential enters evidence tables.
+
+- [ ] **Step 4: Verify and commit**
+
+Run: `pytest tests/meridian/test_evidence.py tests/meridian/test_storage.py -q`
+
+```bash
+git add -- meridian/evidence.py meridian/storage.py meridian/migrations/005_evidence_graph.sql tests/meridian
+git commit -m "feat: add Meridian financial evidence storage"
+```
+
+### Task 22: Ingest read-only email and safe attachments
+
+**Files:**
+- Create: `meridian/connectors/email.py`
+- Create: `meridian/documents/safety.py`
+- Create: `meridian/documents/extract.py`
+- Create: `tests/meridian/connectors/test_email.py`
+- Create: `tests/meridian/documents/test_safety.py`
+- Create: `tests/meridian/documents/test_extract.py`
+
+**Interfaces:**
+- Produces: `ReadOnlyMailConnector.poll(cursor) -> MailBatch`, `validate_attachment(metadata, stream) -> ValidationResult`, and `extract_document(blob) -> ExtractedDocument`.
+
+- [ ] **Step 1: Write connector scope and cursor tests**
+
+Assert the connector requests read-only access, processes each message once, stores source links, handles revocation, and exposes no send/delete/modify methods.
+
+- [ ] **Step 2: Write attachment safety tests**
+
+Cover allowed PDF/JPEG/PNG types, MIME spoofing, decompression bombs, encrypted documents, size limits, malware-scan rejection, duplicate hashes, and sanitized filenames.
+
+- [ ] **Step 3: Write deterministic extraction tests**
+
+Use hand-checked bill, statement, receipt, renewal, and pay-stub fixtures. Assert extracted values retain page/region provenance and ambiguous values remain candidates rather than facts.
+
+- [ ] **Step 4: Run tests and confirm failures**
+
+Run: `pytest tests/meridian/connectors/test_email.py tests/meridian/documents -q`
+
+- [ ] **Step 5: Implement connector, safety pipeline, and extraction**
+
+Run type, size, malware, hash, and encryption checks before parsing. Use text/OCR extraction before structured AI interpretation. Store only allowlisted metadata and encrypted source blobs.
+
+- [ ] **Step 6: Verify and commit**
+
+Run: `pytest tests/meridian/connectors tests/meridian/documents -q`
+
+```bash
+git add -- meridian/connectors meridian/documents tests/meridian/connectors tests/meridian/documents
+git commit -m "feat: ingest financial email documents safely"
+```
+
+### Task 23: Reconcile documents with Commitments and transactions
+
+**Files:**
+- Create: `meridian/documents/reconcile.py`
+- Modify: `meridian/api.py`
+- Modify: `static/js/meridian/transaction-inspector.js`
+- Modify: `static/js/meridian/plan.js`
+- Create: `tests/meridian/documents/test_reconcile.py`
+- Create: `tests/browser/test_document_intelligence.py`
+
+**Interfaces:**
+- Produces: `reconcile_document(extracted, graph) -> DocumentReconciliation`, document-review API, bill→charge→payment chains, and evidence panels in transaction/Commitment details.
+
+- [ ] **Step 1: Write reconciliation tests**
+
+Cover exact and fuzzy bill matches, statement totals, partial payments, duplicate bills, unexpected price increases, late fees, missing expected bills, and ambiguous chains. Assert no relationship changes transaction totals.
+
+- [ ] **Step 2: Write browser tests**
+
+Assert source email/document, extracted facts, confidence, discrepancies, PDF access, retention controls, and proposed Commitment/schedule changes appear in existing Review and inspector surfaces.
+
+- [ ] **Step 3: Run tests and confirm failure**
+
+Run: `pytest tests/meridian/documents/test_reconcile.py tests/browser/test_document_intelligence.py -q`
+
+- [ ] **Step 4: Implement deterministic matching followed by AI tie-breaking**
+
+Use merchant, amount tolerance, dates, masked account reference, and recurrence first. AI may rank ambiguous candidates but must return evidence ids and confidence. Creating or changing a Commitment remains proposal-only.
+
+- [ ] **Step 5: Verify and commit**
+
+Run: `pytest tests/meridian/documents tests/browser/test_document_intelligence.py -q`
+
+```bash
+git add -- meridian/documents/reconcile.py meridian/api.py static/js/meridian tests/meridian/documents tests/browser/test_document_intelligence.py
+git commit -m "feat: reconcile Meridian financial documents"
+```
+
+- [ ] **Slice 5 release gate**
+
+Run the full gate with synthetic mail fixtures and a malware-test corpus. Verify OAuth revocation, retention deletion, encrypted storage, PDF provenance, and zero external writes.
+
+---
+
+## Slice 6 — Life Context
+
+### Task 24: Add opt-in contextual evidence adapters and scenario assumptions
+
+**Files:**
+- Create: `meridian/connectors/calendar.py`
+- Create: `meridian/context.py`
+- Modify: `meridian/scenarios.py`
+- Create: `tests/meridian/connectors/test_calendar.py`
+- Create: `tests/meridian/test_context.py`
+
+**Interfaces:**
+- Produces: `ReadOnlyCalendarConnector`, `ContextSignal`, `ContextRepository`, and `scenario_assumptions(signals, graph) -> list[Assumption]`.
+
+- [ ] **Step 1: Write privacy and inference tests**
+
+Assert source-specific opt-in/revocation, minimum necessary event fields, bounded history, and no expense inference without explicit evidence or user confirmation.
+
+- [ ] **Step 2: Write context tests for payroll, travel, and shared money**
+
+Cover pay-stub/deposit mismatch, dated travel pressure, temporary trip scenarios, school/household seasonality, and Splitwise reimbursement timing. Every assumption must expose source, confidence, range, and confirmation state.
+
+- [ ] **Step 3: Run tests and confirm failure**
+
+Run: `pytest tests/meridian/connectors/test_calendar.py tests/meridian/test_context.py -q`
+
+- [ ] **Step 4: Implement read-only adapters and assumption generation**
+
+Keep event descriptions out of AI prompts unless selected by an allowlisted extractor. Treat correlations as hypotheses and never persist scenario changes without approval.
+
+- [ ] **Step 5: Verify and commit**
+
+Run: `pytest tests/meridian/connectors/test_calendar.py tests/meridian/test_context.py tests/meridian/test_scenarios.py -q`
+
+```bash
+git add -- meridian/connectors/calendar.py meridian/context.py meridian/scenarios.py tests/meridian
+git commit -m "feat: add opt-in life context to Meridian"
+```
+
+- [ ] **Slice 6 release gate**
+
+Verify every context source can be independently revoked, removing it recomputes affected assumptions, and Today/Plan label context-driven scenarios as assumptions rather than facts.
+
+---
+
+## Slice 7 — Asset and Contract Memory
+
+### Task 25: Model assets, contracts, warranties, and obligations
+
+**Files:**
+- Create: `meridian/assets.py`
+- Create: `meridian/contracts.py`
+- Create: `meridian/migrations/006_assets_contracts.sql`
+- Create: `tests/meridian/test_assets.py`
+- Create: `tests/meridian/test_contracts.py`
+
+**Interfaces:**
+- Produces: `Asset`, `Contract`, `Warranty`, `Obligation`, return/renewal/maintenance events, and links to evidence, transactions, and Commitments.
+
+- [ ] **Step 1: Write lifecycle and provenance tests**
+
+Cover return windows, warranty expiration, renewal/cancellation dates, escalation clauses, deductibles, maintenance intervals, replacement reserves, and source-document corrections.
+
+- [ ] **Step 2: Write advisory-boundary tests**
+
+Medical, insurance, lease, and tax-related documents may yield quoted financial facts and deadlines but must not yield medical, legal, coverage, or tax determinations.
+
+- [ ] **Step 3: Run tests and confirm failure**
+
+Run: `pytest tests/meridian/test_assets.py tests/meridian/test_contracts.py -q`
+
+- [ ] **Step 4: Implement models and repositories**
+
+Store extracted facts with evidence spans and confidence. Generate proposed Commitment or reminder changes rather than applying them directly.
+
+- [ ] **Step 5: Verify and commit**
+
+Run: `pytest tests/meridian/test_assets.py tests/meridian/test_contracts.py -q`
+
+```bash
+git add -- meridian/assets.py meridian/contracts.py meridian/migrations/006_assets_contracts.sql tests/meridian
+git commit -m "feat: add Meridian asset and contract memory"
+```
+
+### Task 26: Integrate evidence memory into Today, Plan, Activity, and Accounts
+
+**Files:**
+- Create: `meridian/services/memory.py`
+- Modify: `meridian/services/today.py`
+- Modify: `meridian/services/plan.py`
+- Modify: `meridian/services/activity.py`
+- Modify: `meridian/services/accounts.py`
+- Modify: `meridian/api.py`
+- Create: `static/js/meridian/memory.js`
+- Create: `tests/browser/test_evidence_memory.py`
+
+**Interfaces:**
+- Produces: return/renewal/warranty/maintenance attention items, evidence-linked reserve scenarios, and asset/contract drill-downs using the existing visual system.
+
+- [ ] **Step 1: Write cross-workspace browser tests**
+
+Assert relevant evidence appears in existing workspaces without adding a fifth primary navigation item, preserves Editorial Wealth styling, links to source, supports mobile parity, and explains why each item matters financially.
+
+- [ ] **Step 2: Run tests and confirm failure**
+
+Run: `pytest tests/browser/test_evidence_memory.py -q`
+
+- [ ] **Step 3: Implement memory service and compositions**
+
+Today shows dated attention; Plan shows reserve effects; Activity links receipts/documents; Accounts holds asset and contract structure. Reuse inspector, review, and advisor patterns.
+
+- [ ] **Step 4: Verify and commit**
+
+Run: `pytest tests/meridian tests/browser/test_evidence_memory.py -q`
+
+```bash
+git add -- meridian/services static/js/meridian/memory.js meridian/api.py tests/browser/test_evidence_memory.py
+git commit -m "feat: connect Meridian evidence memory across workspaces"
+```
+
+- [ ] **Final evidence-graph release gate**
+
+Run full CI, privacy and revocation tests, a document-security corpus, cross-provider reconciliation, accessibility/device matrices, and an owner-observed read-only verification. Confirm evidence deletion does not corrupt financial history and no source grants write access.
