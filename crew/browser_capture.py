@@ -11,6 +11,8 @@ import threading
 from typing import Optional
 from urllib.parse import urlparse
 
+from .renewal import CapturerUnavailable
+
 CREW_APP_URL = "https://app.trycrew.com"
 CREW_API_HOST_SUFFIX = "api.trycrew.com"
 
@@ -97,6 +99,3 @@ def create_mac_capturer() -> PlaywrightAuthorizationCapturer:
     except Exception as exc:  # pragma: no cover - exercised via absence of dep
         raise CapturerUnavailable(INSTALL_GUIDANCE) from exc
     return PlaywrightAuthorizationCapturer()
-
-
-from .renewal import CapturerUnavailable  # noqa: E402

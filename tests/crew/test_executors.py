@@ -3,7 +3,6 @@ import pytest
 from crew.actions import ActionState, ActionStore, IllegalTransitionError
 from crew.executors import ExecutorSpec, execute_approved_action, expire_stale_approvals
 
-
 ALLOWED_TYPES = ("move_money",)
 
 

@@ -1,5 +1,5 @@
-import requests
 import pytest
+import requests
 
 from crew.client import (
     CrewAPIError,

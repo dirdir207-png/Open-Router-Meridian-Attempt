@@ -1,0 +1,7 @@
+[lint]
+# Enforce Ruff's core syntax, Pyflakes correctness, and import-normalization
+# checks, including all undefined names, unused imports, and invalid Python
+# constructs. Additional advisory/style families remain unconfigured until
+# their existing baseline can be reviewed and adopted without ignores or
+# blanket suppressions.
+select = ["E9", "F", "I"]

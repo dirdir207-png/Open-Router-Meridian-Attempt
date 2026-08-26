@@ -1,7 +1,12 @@
-flask
+--index-url https://pypi.org/simple
+
+flask==3.1.3
 flask-login==0.6.3
 gunicorn==23.0.0
-requests
-webauthn>=2.0.0
-pywebpush==2.0.1
-py-vapid==1.9.1
+requests==2.34.2
+urllib3==2.7.0
+click==8.5.0
+webauthn==2.7.1
+pywebpush==2.4.0
+aiohttp==3.14.3
+py-vapid==1.9.4

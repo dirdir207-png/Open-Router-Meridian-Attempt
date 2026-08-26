@@ -9,7 +9,6 @@ from crew.actions import (
     UnknownActionTypeError,
 )
 
-
 ALLOWED_TYPES = ("move_money", "create_pocket")
 
 

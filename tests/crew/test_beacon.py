@@ -1,6 +1,6 @@
 import pytest
 
-from crew.beacon import build_forecast
+from crew.beacon import build_forecast, project_reserve
 
 
 def test_declining_balances_project_negative_trajectory():
@@ -44,11 +44,6 @@ def test_low_point_identified_within_horizon():
 def test_non_numeric_entries_are_ignored():
     forecast = build_forecast([1000, None, 980, "oops", 960])
     assert forecast["available"] is True
-
-
-from crew.beacon import project_reserve
-from datetime import date, timedelta
-
 
 def test_reserve_covered_when_bills_small():
     result = project_reserve(

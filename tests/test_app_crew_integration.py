@@ -350,13 +350,13 @@ def test_advisor_requires_login():
 
 
 def test_advisor_status_reports_configuration(authenticated_client, monkeypatch):
-    monkeypatch.setattr(simplecrew, "llm_configured", lambda: False)
+    monkeypatch.setattr(simplecrew.advisor_llm_chain, "providers", lambda: [])
     response = authenticated_client.get("/api/advisor/status")
     assert response.status_code == 200
     assert response.get_json()["configured"] is False
 
 
 def test_advisor_unconfigured_chat_is_503(authenticated_client, monkeypatch):
-    monkeypatch.setattr(simplecrew, "llm_configured", lambda: False)
+    monkeypatch.setattr(simplecrew.advisor_service, "_client", None)
     response = authenticated_client.post("/api/advisor/chat", json={"message": "hi"})
     assert response.status_code == 503

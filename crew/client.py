@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
-import requests
 
+import requests
 
 DEFAULT_CREW_ENDPOINT = "https://api.trycrew.com/willow/graphql"
 

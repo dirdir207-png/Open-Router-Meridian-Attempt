@@ -2,7 +2,6 @@ import os
 
 import pytest
 
-
 APP_URL = os.getenv("APP_URL")
 pytestmark = pytest.mark.skipif(not APP_URL, reason="APP_URL is required for browser smoke tests")
 

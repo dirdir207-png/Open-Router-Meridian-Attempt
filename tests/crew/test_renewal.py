@@ -1,8 +1,5 @@
 import json
-import threading
 import time
-
-import pytest
 
 from crew.renewal import CapturerUnavailable, GuidedRenewalService, RenewalStatus
 
@@ -96,7 +93,7 @@ def test_timeout_expires_and_discards_late_capture():
         timeout_seconds=0.15,
     )
     started = service.start()
-    payload = wait_for_status(service, started["session_id"], RenewalStatus.EXPIRED)
+    wait_for_status(service, started["session_id"], RenewalStatus.EXPIRED)
     assert stored == []
     assert "late-token" not in repr(service)
 

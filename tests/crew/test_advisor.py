@@ -35,12 +35,17 @@ def context_builder():
 
 
 def make_service(llm, store=None):
-    from crew.actions import ActionStore
-
     import tempfile
+
+    from crew.actions import ActionStore
     if store is None:
         store = ActionStore(db_path=tempfile.mktemp(suffix=".db"), allowed_types=("move_money",))
-    resolver = lambda name: {"checking": "acc-1", "rent": "pock-1", "fun money/splurge/travel": "pock-2"}.get((name or "").lower())
+    def resolver(name):
+        return {
+            "checking": "acc-1",
+            "rent": "pock-1",
+            "fun money/splurge/travel": "pock-2",
+        }.get((name or "").lower())
     service = AdvisorService(llm_client=llm, context_builder=context_builder_snapshot(), store=store, resolver=resolver)
     return service, store
 

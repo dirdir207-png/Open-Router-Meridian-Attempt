@@ -1,35 +1,70 @@
-import requests
+import base64
+import functools
+import json
+import os
 import secrets
 import sqlite3
-import time
-import functools
-import os
 import threading
-import json
-from datetime import datetime, date, timedelta
-from flask import Flask, render_template, jsonify, request, send_from_directory, redirect
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
+import time
+import traceback
+from datetime import date, datetime, timedelta
+
+import requests
+from flask import (
+    Flask,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+)
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
 from webauthn import (
-    generate_registration_options,
-    verify_registration_response,
     generate_authentication_options,
-    verify_authentication_response,
+    generate_registration_options,
     options_to_json,
+    verify_authentication_response,
+    verify_registration_response,
 )
 from webauthn.helpers import (
-    parse_registration_credential_json,
     parse_authentication_credential_json,
-)
-from webauthn.helpers.structs import (
-    AuthenticatorSelectionCriteria,
-    UserVerificationRequirement,
-    PublicKeyCredentialDescriptor,
-    AuthenticatorTransport,
-    AttestationConveyancePreference,
-    ResidentKeyRequirement,
+    parse_registration_credential_json,
 )
 from webauthn.helpers.cose import COSEAlgorithmIdentifier
+from webauthn.helpers.structs import (
+    AttestationConveyancePreference,
+    AuthenticatorSelectionCriteria,
+    AuthenticatorTransport,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from crew.actions import ActionStore, IllegalTransitionError, UnknownActionTypeError
+from crew.advisor import (
+    AdvisorService,
+    AdvisorUnavailable,
+    FinancialContextBuilder,
+    build_llm_chain,
+    llm_model,
+)
+from crew.beacon import build_forecast, project_reserve
+from crew.browser_capture import create_mac_capturer
+from crew.client import CrewClient
+from crew.credentials import StoredBearerTokenProvider
+from crew.executors import ExecutorSpec, execute_approved_action, expire_stale_approvals
+from crew.health import CredentialHealthService
+from crew.proposals import ProposalError, build_transfer_proposal
+from crew.propose_key import get_or_create_local_key
+from crew.renewal import GuidedRenewalService, sanitize_status_payload
 
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -722,11 +757,6 @@ def get_crew_bearer_token():
     # Fallback to env var for backward compatibility
     return os.environ.get("BEARER_TOKEN")
 
-# --- CREW INTEGRATION (Hybrid Gateway Foundation) ---
-from crew.client import CrewClient
-from crew.credentials import StoredBearerTokenProvider
-from crew.health import CredentialHealthService
-
 crew_credential_provider = StoredBearerTokenProvider(get_crew_bearer_token)
 crew_client = CrewClient(crew_credential_provider, endpoint=URL, timeout_seconds=15)
 crew_health_service = CredentialHealthService(crew_client)
@@ -745,21 +775,12 @@ def store_crew_credential(value):
     conn.commit()
     conn.close()
 
-# --- GUIDED CREW CREDENTIAL RENEWAL (Milestone 2) ---
-from crew.browser_capture import create_mac_capturer
-from crew.renewal import GuidedRenewalService, sanitize_status_payload
-
 crew_renewal_service = GuidedRenewalService(
     capturer_factory=create_mac_capturer,
     storer=store_crew_credential,
     health_checker=lambda: crew_health_service.check(),
     timeout_seconds=300,
 )
-
-# --- ACTION PIPELINE (Milestone 3): propose -> approve -> execute -> verify ---
-from crew.actions import ActionStore, IllegalTransitionError, UnknownActionTypeError
-from crew.executors import ExecutorSpec, execute_approved_action, expire_stale_approvals
-from crew.proposals import build_transfer_proposal, ProposalError
 
 APPROVAL_TTL_SECONDS = 3600
 
@@ -770,8 +791,6 @@ def verify_transfer_action(params, result):
     return {"ok": confirmed, "check": "confirmed-transfer-id"}
 
 action_store = ActionStore(db_path=DB_FILE, allowed_types=("move_money",))
-from crew.propose_key import get_or_create_local_key
-
 local_proposer_key = get_or_create_local_key(DB_FILE)
 action_executors = {
     "move_money": ExecutorSpec(
@@ -792,17 +811,6 @@ def resolve_crew_target(name):
         if (sub.get("name") or "").strip().lower() == wanted:
             return sub.get("id")
     return None
-
-# --- AI ADVISOR (Milestone 5): chat that can only propose ---
-from crew.advisor import (
-    AdvisorService,
-    AdvisorUnavailable,
-    FinancialContextBuilder,
-    OpenAICompatClient,
-    build_llm_chain,
-    llm_configured,
-    llm_model,
-)
 
 def _financial_snapshot():
     snap = {"safe_to_spend": None, "accounts": [], "pockets": []}
@@ -835,9 +843,6 @@ advisor_service = AdvisorService(
     store=action_store,
     resolver=resolve_crew_target,
 )
-
-# --- BEACON BUDGET FORECAST (Milestone 6) ---
-from crew.beacon import build_forecast, project_reserve
 
 @app.route('/api/beacon/forecast')
 @login_required
@@ -1024,7 +1029,7 @@ def send_sync_complete_notification(user_id, transaction_count, account_names):
 
     # Send via Web Push
     try:
-        from pywebpush import webpush, WebPushException
+        from pywebpush import WebPushException, webpush
 
         # Build notification payload
         payload = json.dumps({
@@ -1110,7 +1115,7 @@ def send_splitwise_notification(user_id, friends_changed):
 
     # Send via Web Push
     try:
-        from pywebpush import webpush, WebPushException
+        from pywebpush import WebPushException, webpush
 
         payload = json.dumps({
             "notification": {
@@ -1777,7 +1782,6 @@ def get_configured_timezone():
     try:
         from zoneinfo import ZoneInfo
     except ImportError:
-        from datetime import timezone as tz_module
         # Fallback for Python < 3.9
         return None
 
@@ -1798,7 +1802,12 @@ def get_configured_timezone():
         return None
 
 def move_money(from_id, to_id, amount, memo=""):
-    from crew.client import CrewAPIError, CrewAuthenticationError, CrewTransportError, CrewUncertainWriteError
+    from crew.client import (
+        CrewAPIError,
+        CrewAuthenticationError,
+        CrewTransportError,
+        CrewUncertainWriteError,
+    )
 
     query_string = """ mutation InitiateTransferScottie($input: InitiateTransferInput!) { initiateTransfer(input: $input) { result { id __typename } __typename } } """
     variables = {"input": {"amount": int(round(float(amount) * 100)), "accountFromId": from_id, "accountToId": to_id, "note": memo or "Transfer"}}
@@ -2803,7 +2812,7 @@ def webauthn_register_verify():
     # Verify user matches
     if user_id != current_user.id:
         conn.close()
-        print(f"[WebAuthn Register Verify] ERROR: User mismatch")
+        print("[WebAuthn Register Verify] ERROR: User mismatch")
         return jsonify({"success": False, "error": "User mismatch"}), 403
 
     try:
@@ -2822,7 +2831,7 @@ def webauthn_register_verify():
             expected_rp_id=rp_id,
         )
 
-        print(f"[WebAuthn Register Verify] Verification successful!")
+        print("[WebAuthn Register Verify] Verification successful!")
 
         # Save credential to database
         save_credential(current_user.id, {
@@ -2850,13 +2859,12 @@ def webauthn_register_verify():
         conn.commit()
         conn.close()
 
-        print(f"[WebAuthn Register Verify] Passkey saved successfully")
+        print("[WebAuthn Register Verify] Passkey saved successfully")
         return jsonify({"success": True})
 
     except Exception as e:
         conn.close()
         print(f"[WebAuthn Register Verify] ERROR: {type(e).__name__}: {str(e)}")
-        import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 400
 
@@ -2907,7 +2915,7 @@ def webauthn_authenticate_options():
             )
     else:
         # Discoverable credential mode: no username, browser will show all available passkeys
-        print(f"[WebAuthn Auth] Using discoverable credentials (no username provided)")
+        print("[WebAuthn Auth] Using discoverable credentials (no username provided)")
         # allow_credentials remains empty - browser will prompt for any stored passkey
 
     # Generate authentication options
@@ -2995,7 +3003,7 @@ def webauthn_authenticate_verify():
 
     if not cred_row:
         conn.close()
-        print(f"[WebAuthn Auth Verify] ERROR: Credential not found in database")
+        print("[WebAuthn Auth Verify] ERROR: Credential not found in database")
         return jsonify({"success": False, "error": "Credential not found"}), 404
 
     public_key, current_sign_count, cred_user_id = cred_row
@@ -3004,7 +3012,7 @@ def webauthn_authenticate_verify():
     # If user_id is None, we're in discoverable credential mode - use credential's user_id
     if user_id is not None and cred_user_id != user_id:
         conn.close()
-        print(f"[WebAuthn Auth Verify] ERROR: Credential/user mismatch")
+        print("[WebAuthn Auth Verify] ERROR: Credential/user mismatch")
         return jsonify({"success": False, "error": "Credential/user mismatch"}), 403
 
     # Use credential's user_id for discoverable mode
@@ -3027,7 +3035,7 @@ def webauthn_authenticate_verify():
             credential_current_sign_count=current_sign_count,
         )
 
-        print(f"[WebAuthn Auth Verify] Verification successful!")
+        print("[WebAuthn Auth Verify] Verification successful!")
 
         # Update sign count
         update_sign_count(credential_id_bytes, verification.new_sign_count)
@@ -3050,7 +3058,7 @@ def webauthn_authenticate_verify():
         conn.commit()
         conn.close()
 
-        print(f"[WebAuthn Auth Verify] Login successful!")
+        print("[WebAuthn Auth Verify] Login successful!")
         return jsonify({"success": True})
 
     except Exception as e:
@@ -5627,10 +5635,10 @@ def api_sync_balance():
         if abs(difference) > 0.01:  # Only transfer if difference is significant
             if difference > 0:
                 # Need to move money from Checking to Pocket
-                result = move_money(checking_subaccount_id, pocket_id, str(difference), f"Sync credit card balance")
+                result = move_money(checking_subaccount_id, pocket_id, str(difference), "Sync credit card balance")
             else:
                 # Need to move money from Pocket to Checking
-                result = move_money(pocket_id, checking_subaccount_id, str(abs(difference)), f"Sync credit card balance")
+                result = move_money(pocket_id, checking_subaccount_id, str(abs(difference)), "Sync credit card balance")
             
             if "error" in result:
                 return jsonify({"error": f"Failed to sync balance: {result['error']}"}), 500
@@ -5832,7 +5840,7 @@ def check_credit_card_transactions():
         else:
             for row in rows:
                 if row[2] == 'simplefin':
-                    print(f"⚠️ SimpleFin access URL not found in simplefin_config", flush=True)
+                    print("⚠️ SimpleFin access URL not found in simplefin_config", flush=True)
                     break
 
         # Batch fetch SimpleFin data for all due accounts in a single request
@@ -5942,10 +5950,6 @@ def check_lunchflow_transactions(conn, c, account_id, pocket_id, api_key):
     """Check LunchFlow for new transactions"""
     try:
         # Get when credit card was added
-        c.execute("SELECT created_at FROM credit_card_config WHERE account_id = ?", (account_id,))
-        config_row = c.fetchone()
-        added_date = config_row[0] if config_row else None
-
         # Fetch transactions from LunchFlow
         headers = {"x-api-key": api_key, "accept": "application/json"}
         try:
@@ -6021,15 +6025,15 @@ def check_lunchflow_transactions(conn, c, account_id, pocket_id, api_key):
 
                         if checking_subaccount_id and abs(difference) > 0.01:
                             if difference > 0:
-                                move_money(checking_subaccount_id, pocket_id, str(difference), f"LunchFlow credit card sync")
+                                move_money(checking_subaccount_id, pocket_id, str(difference), "LunchFlow credit card sync")
                             else:
-                                move_money(pocket_id, checking_subaccount_id, str(abs(difference)), f"LunchFlow credit card sync")
+                                move_money(pocket_id, checking_subaccount_id, str(abs(difference)), "LunchFlow credit card sync")
                         cache.clear()
 
         if new_transactions:
             print(f"✅ Found {len(new_transactions)} new LunchFlow credit card transactions")
         else:
-            print(f"🔄 LunchFlow credit card balance checked (no new transactions)")
+            print("🔄 LunchFlow credit card balance checked (no new transactions)")
 
     except Exception as e:
         print(f"Error checking LunchFlow transactions: {e}")
@@ -6089,7 +6093,7 @@ def check_simplefin_transactions(conn, c, account_id, pocket_id, access_url, is_
             if acc_id == account_id:
                 target_account = account
                 transactions = account.get("transactions", [])
-                print(f"  ✅ MATCH! This is our tracked account")
+                print("  ✅ MATCH! This is our tracked account")
                 break
 
         if not target_account:
@@ -6365,15 +6369,15 @@ def check_simplefin_transactions(conn, c, account_id, pocket_id, access_url, is_
 
                         if checking_subaccount_id and abs(difference) > 0.01:
                             if difference > 0:
-                                move_money(checking_subaccount_id, pocket_id, str(difference), f"SimpleFin credit card sync")
+                                move_money(checking_subaccount_id, pocket_id, str(difference), "SimpleFin credit card sync")
                             else:
-                                move_money(pocket_id, checking_subaccount_id, str(abs(difference)), f"SimpleFin credit card sync")
+                                move_money(pocket_id, checking_subaccount_id, str(abs(difference)), "SimpleFin credit card sync")
                         cache.clear()
 
         if new_transactions:
             print(f"✅ Found {len(new_transactions)} new SimpleFin credit card transactions")
         else:
-            print(f"🔄 SimpleFin credit card balance checked (no new transactions)")
+            print("🔄 SimpleFin credit card balance checked (no new transactions)")
 
     except Exception as e:
         print(f"❌ Error checking SimpleFin transactions: {e}")
@@ -6599,8 +6603,6 @@ def api_get_credit_card_transactions():
         return jsonify({"error": str(e)}), 500
 
 # --- SIMPLEFIN API ENDPOINTS ---
-import base64
-from urllib.parse import urlparse
 
 def store_simplefin_access_url(access_url):
     """Store or update the SimpleFin access URL in the global config table"""
@@ -6731,7 +6733,7 @@ def api_simplefin_get_access_url():
             print(f"✅ SimpleFin access URL found (url length: {len(row[0])})", flush=True)
             return jsonify({"success": True, "accessUrl": row[0]})
         else:
-            print(f"⚠️ No SimpleFin access URL found in database", flush=True)
+            print("⚠️ No SimpleFin access URL found in database", flush=True)
             return jsonify({"success": False, "accessUrl": None})
     except Exception as e:
         print(f"❌ ERROR fetching SimpleFin access URL: {e}", flush=True)
@@ -7038,9 +7040,9 @@ def api_simplefin_sync_balance():
         # Transfer money to/from pocket
         if abs(difference) > 0:  # Only transfer if difference is significant
             if difference > 0:
-                result = move_money(checking_subaccount_id, pocket_id, str(difference), f"SimpleFin sync credit card balance")
+                result = move_money(checking_subaccount_id, pocket_id, str(difference), "SimpleFin sync credit card balance")
             else:
-                result = move_money(pocket_id, checking_subaccount_id, str(abs(difference)), f"SimpleFin sync credit card balance")
+                result = move_money(pocket_id, checking_subaccount_id, str(abs(difference)), "SimpleFin sync credit card balance")
 
             if "error" in result:
                 return jsonify({"error": f"Failed to sync balance: {result['error']}"}), 500
@@ -7301,7 +7303,7 @@ def api_simplefin_disconnect():
 
                     # Return money to Checking
                     if checking_subaccount_id and current_balance > 0.01:
-                        move_money(pocket_id, checking_subaccount_id, str(current_balance), f"Disconnecting SimpleFin - returning funds")
+                        move_money(pocket_id, checking_subaccount_id, str(current_balance), "Disconnecting SimpleFin - returning funds")
 
                     # Delete the pocket
                     delete_subaccount_action(pocket_id)

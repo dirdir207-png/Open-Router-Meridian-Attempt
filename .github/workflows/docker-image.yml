@@ -9,6 +9,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  SOURCE_IMAGE: meridian:${{ github.sha }}
 
 jobs:
   quality:
@@ -19,9 +20,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
-      - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: ruff check --select E9,F63,F7 app.py crew tests
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip setuptools
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - run: ruff check app.py crew tests
       - run: pytest -q
       - run: pip-audit
 
@@ -32,7 +34,14 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t meridian:ci .
+      - run: docker build --tag "$SOURCE_IMAGE" .
+      - run: docker image inspect --format 'Built image ID: {{.Id}}' "$SOURCE_IMAGE"
+      - run: docker save "$SOURCE_IMAGE" | gzip > meridian-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meridian-image
+          path: meridian-image.tar.gz
+          if-no-files-found: error
 
   browser-smoke:
     needs: docker-build
@@ -43,16 +52,37 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
-      - run: pip install -r requirements-dev.txt
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip setuptools
+      - run: python -m pip install -r requirements-dev.txt
       - run: python -m playwright install --with-deps chromium
-      - run: docker build -t meridian:ci .
-      - run: docker run --detach --name meridian-smoke --env DB_FILE=/tmp/meridian-smoke.db --publish 8080:8080 meridian:ci
-      - run: |
-          until curl --fail --silent http://127.0.0.1:8080/login > /dev/null; do sleep 1; done
+      - uses: actions/download-artifact@v4
+        with:
+          name: meridian-image
+          path: artifact
+      - run: gzip -dc artifact/meridian-image.tar.gz | docker load
+      - run: docker image inspect --format 'Smoke image ID: {{.Id}}' "$SOURCE_IMAGE"
+      - run: docker run --detach --name meridian-smoke --env DB_FILE=/tmp/meridian-smoke.db --publish 8080:8080 "$SOURCE_IMAGE"
+      - name: Wait for browser target
+        run: |
+          set -eu
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:8080/login > /dev/null; then
+              exit 0
+            fi
+            echo "Waiting for browser target (attempt ${attempt}/30)"
+            docker logs meridian-smoke || true
+            sleep 1
+          done
+          echo "Browser target did not become ready within 30 seconds"
+          docker inspect meridian-smoke || true
+          docker logs meridian-smoke || true
+          exit 1
       - run: APP_URL=http://127.0.0.1:8080 pytest tests/browser -q
       - if: always()
-        run: docker logs meridian-smoke && docker rm --force meridian-smoke
+        run: docker logs meridian-smoke || true
+      - if: always()
+        run: docker rm --force meridian-smoke || true
 
   publish:
     needs: [quality, docker-build, browser-smoke]
@@ -63,6 +93,12 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: meridian-image
+          path: artifact
+      - run: gzip -dc artifact/meridian-image.tar.gz | docker load
+      - run: docker image inspect --format 'Publishing tested image ID: {{.Id}}' "$SOURCE_IMAGE"
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -77,10 +113,13 @@ jobs:
           tags: |
             type=raw,value=latest
             type=sha
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      - name: Tag and push the tested image
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -eu
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag "$SOURCE_IMAGE" "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"

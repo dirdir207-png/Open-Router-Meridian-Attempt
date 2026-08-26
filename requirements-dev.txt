@@ -1,4 +1,6 @@
-pytest
-playwright
-ruff
-pip-audit
+--index-url https://pypi.org/simple
+
+pytest==9.0.3
+playwright==1.60.0
+ruff==0.16.4
+pip-audit==2.9.0

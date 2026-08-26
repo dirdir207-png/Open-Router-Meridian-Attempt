@@ -1,7 +1,6 @@
 import pytest
 
 from crew.browser_capture import (
-    INSTALL_GUIDANCE,
     PlaywrightAuthorizationCapturer,
     _is_crew_api_url,
     create_mac_capturer,
