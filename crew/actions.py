@@ -84,6 +84,7 @@ class ActionStore:
         self._db_path = db_path
         self._allowed_types = frozenset(allowed_types)
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute(_SCHEMA)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(action_requests)")}
             for column, column_type in _EXECUTION_COLUMNS.items():
@@ -204,13 +205,21 @@ class ActionStore:
         if verification_json is not None:
             assignments.append("verification_json = ?")
             values.append(verification_json)
-        values.append(request_id)
+        values += [request_id, from_state.value]
 
         with self._connect() as conn:
-            conn.execute(f"UPDATE action_requests SET {', '.join(assignments)} WHERE id = ?", tuple(values))
-        updated = self.get(request_id)
-        assert updated is not None
-        return updated
+            updated = conn.execute(
+                f"UPDATE action_requests SET {', '.join(assignments)} WHERE id = ? AND state = ?",
+                tuple(values),
+            )
+            if updated.rowcount != 1:
+                raise IllegalTransitionError("Action state changed before transition completed")
+            row = conn.execute(
+                f"SELECT {_SELECT_COLUMNS} FROM action_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+        assert row is not None
+        return self._row_to_dict(row)
 
     @staticmethod
     def _row_to_dict(row) -> Dict[str, Any]:

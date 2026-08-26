@@ -49,7 +49,11 @@ def execute_approved_action(
     except Exception as exc:
         return store.mark_failed(
             request_id,
-            _failure({}, str(exc) or "Executor raised an exception", "executor_exception"),
+            _failure(
+                {"verify_state": True},
+                str(exc) or "Executor raised an exception",
+                "executor_exception",
+            ),
         )
 
     if not isinstance(result, dict) or not result.get("success"):

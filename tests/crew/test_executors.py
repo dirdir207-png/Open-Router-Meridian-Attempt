@@ -67,14 +67,23 @@ def test_error_contract_lands_in_failed_without_verification(store):
     assert calls == []
 
 
-def test_executor_exception_becomes_normalized_failure(store):
+def test_executor_exception_persists_uncertain_outcome_without_retry_or_verification(store):
+    calls = {"executor": 0, "verifier": 0}
+
     def broken(params):
+        calls["executor"] += 1
         raise RuntimeError("boom")
 
+    def verifier(params, result):
+        calls["verifier"] += 1
+        return {"ok": True}
+
     action_id = seed_approved_action(store)
-    final = execute_approved_action(store, action_id, make_executors(fn=broken))
+    final = execute_approved_action(store, action_id, make_executors(fn=broken, verifier=verifier))
     assert final["state"] == ActionState.FAILED.value
     assert final["result"]["error_code"] == "executor_exception"
+    assert final["result"]["verify_state"] is True
+    assert calls == {"executor": 1, "verifier": 0}
 
 
 def test_unapproved_action_cannot_execute(store):
