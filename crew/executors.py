@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from .actions import ActionState, ActionStore
+from .actions import ActionState, ActionStore, IllegalTransitionError
 
 
 @dataclass(frozen=True)
@@ -112,6 +112,9 @@ def expire_stale_approvals(
         except ValueError:
             continue
         if age >= ttl_seconds:
-            store.expire(request["id"])
+            try:
+                store.expire(request["id"])
+            except IllegalTransitionError:
+                continue
             expired_ids.append(request["id"])
     return expired_ids

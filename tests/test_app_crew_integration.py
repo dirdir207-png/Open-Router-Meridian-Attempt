@@ -242,6 +242,45 @@ def test_action_pipeline_full_lifecycle_over_http(authenticated_client, action_e
     assert pending.get_json()["actions"] == []
 
 
+def test_pending_endpoint_tolerates_claim_during_expiry_sweep(authenticated_client, tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from crew import actions as actions_module
+    from crew.actions import ActionState, ActionStore
+
+    class ClaimingActionStore(ActionStore):
+        claim_during_sweep = None
+
+        def list_by_state(self, state):
+            requests = super().list_by_state(state)
+            if state == ActionState.APPROVED and self.claim_during_sweep:
+                claimed_id = self.claim_during_sweep
+                self.claim_during_sweep = None
+                self.claim_for_execution(claimed_id, "http-sweep-race-key")
+                requests.sort(key=lambda request: request["id"] != claimed_id)
+            return requests
+
+    old_time = datetime.now() - timedelta(hours=2)
+    monkeypatch.setattr(actions_module, "_now", lambda: old_time)
+    store = ClaimingActionStore(
+        db_path=str(tmp_path / "actions.db"),
+        allowed_types=("move_money",),
+    )
+    claimed = store.propose("move_money", {"amount": 10}, "race", "owner")
+    store.approve(claimed["id"], decided_by="owner")
+    expires = store.propose("move_money", {"amount": 20}, "expire", "owner")
+    store.approve(expires["id"], decided_by="owner")
+    store.claim_during_sweep = claimed["id"]
+    monkeypatch.setattr(simplecrew, "action_store", store)
+
+    response = authenticated_client.get("/api/actions/pending")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"actions": []}
+    assert store.get(claimed["id"])["state"] == ActionState.EXECUTING.value
+    assert store.get(expires["id"])["state"] == ActionState.EXPIRED.value
+
+
 def test_propose_unknown_type_is_400(authenticated_client):
     response = authenticated_client.post(
         "/api/actions/propose",

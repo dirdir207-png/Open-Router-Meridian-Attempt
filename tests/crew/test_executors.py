@@ -171,3 +171,37 @@ def test_stale_approvals_expire_recent_ones_survive(store, monkeypatch):
 
     with pytest.raises(IllegalTransitionError):
         execute_approved_action(store, stale_id, make_executors())
+
+
+def test_expiry_sweep_tolerates_claim_race_and_continues(tmp_path):
+    from datetime import datetime, timedelta
+
+    class ClaimingActionStore(ActionStore):
+        claim_during_sweep = None
+
+        def list_by_state(self, state):
+            requests = super().list_by_state(state)
+            if state == ActionState.APPROVED and self.claim_during_sweep:
+                claimed_id = self.claim_during_sweep
+                self.claim_during_sweep = None
+                self.claim_for_execution(claimed_id, "sweep-race-key")
+                requests.sort(key=lambda request: request["id"] != claimed_id)
+            return requests
+
+    racing_store = ClaimingActionStore(
+        db_path=str(tmp_path / "actions.db"),
+        allowed_types=ALLOWED_TYPES,
+    )
+    claimed_id = seed_approved_action(racing_store)
+    expired_id = seed_approved_action(racing_store)
+    racing_store.claim_during_sweep = claimed_id
+
+    expired_ids = expire_stale_approvals(
+        racing_store,
+        ttl_seconds=3600,
+        now=datetime.now() + timedelta(hours=2),
+    )
+
+    assert expired_ids == [expired_id]
+    assert racing_store.get(claimed_id)["state"] == ActionState.EXECUTING.value
+    assert racing_store.get(expired_id)["state"] == ActionState.EXPIRED.value
