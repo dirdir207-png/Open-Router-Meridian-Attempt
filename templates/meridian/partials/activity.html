@@ -1,0 +1,19 @@
+<div class="m-activity" data-activity-root>
+  <div class="m-activity-toolbar">
+    <label class="m-field">
+      <span class="m-field-label">Account</span>
+      <select class="m-select" data-account-filter>
+        <option value="">All accounts</option>
+      </select>
+    </label>
+    <span class="m-chip" data-freshness data-state="unavailable"></span>
+  </div>
+
+  <div class="m-ledger" data-ledger></div>
+
+  <p class="m-empty-note" data-activity-empty hidden>No transactions yet.</p>
+
+  <button type="button" class="m-button" data-load-more hidden>Load more</button>
+
+  <p class="m-inline-error" data-activity-error role="alert" hidden></p>
+</div>

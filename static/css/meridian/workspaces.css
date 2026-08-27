@@ -1,0 +1,274 @@
+/* Meridian workspace compositions: Today's Editorial Wealth hierarchy and
+   the Activity ledger. Charts-free; direct labels and restrained color. */
+
+/* ---------- Today ---------- */
+
+.m-today {
+  margin: 0;
+  display: grid;
+  gap: var(--m-space-6);
+}
+
+.m-section-label,
+.m-sts-label {
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--m-ink-muted);
+  margin: 0;
+}
+
+.m-sts-figure-block {
+  margin: var(--m-space-2) 0 0;
+}
+
+.m-sts-figure {
+  display: block;
+  font-family: var(--m-font-serif);
+  font-weight: 500;
+  font-size: var(--m-figure-xl);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--m-ink);
+}
+
+.m-sts-note {
+  display: inline-block;
+  margin-top: var(--m-space-2);
+  padding: var(--m-space-1) var(--m-space-3);
+  border-radius: var(--m-radius-pill);
+  background: var(--m-information-wash);
+  color: var(--m-information);
+  font-size: var(--m-text-sm);
+  font-weight: 500;
+}
+
+.m-input-list {
+  list-style: none;
+  margin: var(--m-space-3) 0 0;
+  padding: 0;
+  max-width: 480px;
+}
+
+.m-input-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--m-space-4);
+  padding: var(--m-space-3) 0;
+  border-bottom: 1px solid var(--m-border);
+}
+
+.m-input-label {
+  color: var(--m-ink-muted);
+  font-size: var(--m-text-md);
+}
+
+.m-input-value {
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-today-reason {
+  margin: var(--m-space-3) 0 0;
+  color: var(--m-ink-muted);
+  font-size: var(--m-text-sm);
+  max-width: 60ch;
+}
+
+.m-upcoming [data-upcoming-empty] {
+  margin-top: var(--m-space-3);
+}
+
+.m-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--m-space-2);
+  width: fit-content;
+  padding: var(--m-space-1) var(--m-space-3);
+  border-radius: var(--m-radius-pill);
+  font-size: var(--m-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.m-chip::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.m-chip[data-state="fresh"] {
+  background: var(--m-healthy-wash);
+  color: var(--m-healthy);
+}
+
+.m-chip[data-state="stale"] {
+  background: var(--m-caution-wash);
+  color: var(--m-caution);
+}
+
+.m-chip[data-state="unavailable"] {
+  background: var(--m-surface-muted);
+  color: var(--m-ink-muted);
+}
+
+.m-inline-error {
+  margin: var(--m-space-4) 0 0;
+  padding: var(--m-space-3) var(--m-space-4);
+  background: var(--m-risk-wash);
+  color: var(--m-risk);
+  border-radius: var(--m-radius-md);
+  font-size: var(--m-text-sm);
+}
+
+[aria-busy="true"] [data-ledger],
+[aria-busy="true"] .m-sts-figure {
+  opacity: 0.55;
+}
+
+/* ---------- Activity ---------- */
+
+.m-activity {
+  display: grid;
+  gap: var(--m-space-5);
+}
+
+/* Reserve room so loading/empty states never collapse the workspace. */
+.m-ledger {
+  min-height: var(--m-space-8);
+}
+
+.m-activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--m-space-4);
+  flex-wrap: wrap;
+}
+
+.m-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--m-space-1);
+}
+
+.m-field-label {
+  font-size: var(--m-text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--m-ink-muted);
+}
+
+.m-select {
+  min-height: 44px;
+  min-width: 200px;
+  padding: 0 var(--m-space-3);
+  border: 1px solid var(--m-border-strong);
+  border-radius: var(--m-radius-md);
+  background: var(--m-surface);
+  color: var(--m-ink);
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-md);
+}
+
+.m-day-group + .m-day-group {
+  margin-top: var(--m-space-6);
+}
+
+.m-day-heading {
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--m-ink-faint);
+  margin: 0 0 var(--m-space-2);
+}
+
+.m-transaction-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--m-space-4);
+  width: 100%;
+  padding: var(--m-space-3) var(--m-space-2);
+  border-bottom: 1px solid var(--m-border);
+  text-align: left;
+}
+
+[data-day-rows] > .m-transaction-row:last-child {
+  border-bottom-color: transparent;
+}
+
+.m-row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.m-row-title {
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-md);
+  font-weight: 500;
+  color: var(--m-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m-row-sub {
+  font-size: var(--m-text-xs);
+  color: var(--m-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m-row-amount {
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-md);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.m-row-amount.is-income {
+  color: var(--m-healthy);
+}
+
+.m-row-amount.is-spend {
+  color: var(--m-ink);
+}
+
+.m-button {
+  min-height: 44px;
+  padding: var(--m-space-3) var(--m-space-5);
+  border: 1px solid var(--m-border-strong);
+  border-radius: var(--m-radius-pill);
+  background: var(--m-surface);
+  color: var(--m-ink);
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-md);
+  font-weight: 500;
+}
+
+.m-button:hover {
+  background: var(--m-surface-muted);
+}
+
+@media (max-width: 900px) {
+  .m-sts-figure {
+    font-size: clamp(2.25rem, 12vw, 3rem);
+  }
+
+  .m-select {
+    min-width: 0;
+    flex: 1;
+  }
+}

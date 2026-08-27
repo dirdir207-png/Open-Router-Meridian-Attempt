@@ -39,6 +39,16 @@
         link.removeAttribute("aria-current");
       }
     });
+
+    document.dispatchEvent(
+      new CustomEvent("meridian:workspacechange", {
+        detail: { workspace: name },
+      })
+    );
+  }
+
+  function getWorkspace() {
+    return activeWorkspace || DEFAULT_WORKSPACE;
   }
 
   function setWorkspace(name, options) {
@@ -125,7 +135,7 @@
 
   /* ---------- Global API ---------- */
 
-  const MeridianShell = { setWorkspace, openSheet, closeSheet };
+  const MeridianShell = { setWorkspace, getWorkspace, openSheet, closeSheet };
   window.MeridianShell = MeridianShell;
 
   document.addEventListener("click", (event) => {

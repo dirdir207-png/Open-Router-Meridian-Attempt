@@ -13,6 +13,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/meridian/tokens.css">
   <link rel="stylesheet" href="/static/css/meridian/shell.css">
+  <link rel="stylesheet" href="/static/css/meridian/workspaces.css">
   <link rel="stylesheet" href="/static/css/meridian/motion.css">
 </head>
 <body>
@@ -44,9 +45,15 @@
       >
         <h1 class="m-workspace-heading" id="workspace-heading-{{ name }}">{{ label }}</h1>
         <p class="m-workspace-subline">{{ subline }}</p>
-        <div data-workspace-content="{{ name }}">
-          <p class="m-empty-note">This workspace is arriving with the next slice.</p>
-        </div>
+      <div data-workspace-content="{{ name }}">
+        {%- if name == 'today' -%}
+          {% include 'meridian/partials/today.html' %}
+        {%- elif name == 'activity' -%}
+          {% include 'meridian/partials/activity.html' %}
+        {%- else -%}
+          <p class="m-empty-note">This workspace is arriving with a later slice.</p>
+        {%- endif %}
+      </div>
       </section>
       {% endfor %}
     </main>
@@ -57,5 +64,7 @@
   </div>
 
   <script type="module" src="/static/js/meridian/shell.js"></script>
+  <script type="module" src="/static/js/meridian/today.js"></script>
+  <script type="module" src="/static/js/meridian/activity.js"></script>
 </body>
 </html>
