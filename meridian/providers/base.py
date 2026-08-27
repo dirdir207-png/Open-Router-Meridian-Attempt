@@ -45,6 +45,8 @@ class ProviderSnapshot:
 
 class ProviderAdapter(Protocol):
     provider_name: str
+    connection_external_id: str
+    connection_name: str
 
     def fetch_snapshot(self) -> ProviderSnapshot:
         """Return a credential-free read-only source snapshot."""

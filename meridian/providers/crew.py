@@ -1,5 +1,6 @@
 """Read-only Crew adapter that emits credential-free normalized records."""
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional
 
 from .base import NormalizedAccount, NormalizedTransaction, ProviderSnapshot
@@ -35,11 +36,19 @@ query RecentActivity($accountId: ID!, $cursor: String, $pageSize: Int = 100) {
             title
             occurredAt
             type
+            status
             memo
             externalMemo
             matchingName
             subaccount { id }
-            transfer { id type }
+            transfer {
+              id
+              type
+              accountFrom { id belongsToCurrentUser }
+              accountTo { id belongsToCurrentUser }
+              subaccountFrom { id belongsToCurrentUser }
+              subaccountTo { id belongsToCurrentUser }
+            }
           }
         }
         pageInfo { hasNextPage endCursor }
@@ -54,9 +63,12 @@ class CrewReadAdapter:
     """Translate Crew reads without exposing source payloads or credentials."""
 
     provider_name = "crew"
+    connection_external_id = "current-user"
+    connection_name = "Crew"
 
-    def __init__(self, client):
+    def __init__(self, client, observed_at: Optional[str] = None):
         self._client = client
+        self._observed_at = observed_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def fetch_snapshot(self) -> ProviderSnapshot:
         user_data = self._client.execute("CurrentUser", _CURRENT_USER_QUERY)
@@ -71,23 +83,43 @@ class CrewReadAdapter:
                 continue
             source_accounts.append(source_account)
             for subaccount in source_account.get("subaccounts") or []:
-                normalized = self._normalize_account(subaccount)
+                normalized = self._normalize_account(subaccount, self._observed_at)
                 if normalized is not None:
                     accounts.append(normalized)
                     owned_subaccount_ids.add(normalized.external_id)
 
         transactions, errors = self._fetch_transactions(source_accounts, owned_subaccount_ids)
+        source_accounts_by_id = {item["id"]: item for item in source_accounts}
+        parent_account_ids = {
+            transaction.account_external_id
+            for transaction in transactions
+            if transaction.account_external_id in source_accounts_by_id
+        }
+        accounts.extend(
+            self._normalize_parent_account(source_accounts_by_id[account_id])
+            for account_id in sorted(parent_account_ids)
+        )
         return ProviderSnapshot(
-            connection_external_id="current-user",
-            connection_name="Crew",
+            connection_external_id=self.connection_external_id,
+            connection_name=self.connection_name,
             accounts=tuple(accounts),
             transactions=tuple(transactions),
             is_complete=not errors,
             errors=tuple(errors),
         )
 
+    def _normalize_parent_account(self, source: Dict[str, Any]) -> NormalizedAccount:
+        return NormalizedAccount(
+            external_id=source["id"],
+            name=str(source.get("displayName") or "Crew account"),
+            account_type="checking",
+            balance=sum(float(item.get("overallBalance") or 0) for item in source.get("subaccounts") or []) / 100,
+            is_active=True,
+            source_updated_at=self._observed_at,
+        )
+
     @staticmethod
-    def _normalize_account(source: Dict[str, Any]) -> Optional[NormalizedAccount]:
+    def _normalize_account(source: Dict[str, Any], observed_at: str) -> Optional[NormalizedAccount]:
         external_id = source.get("id")
         if not isinstance(external_id, str) or not external_id:
             return None
@@ -99,6 +131,7 @@ class CrewReadAdapter:
             account_type="checking" if is_primary or str(name).lower() == "checking" else "pocket",
             balance=float(source.get("overallBalance") or 0) / 100,
             is_active=True,
+            source_updated_at=observed_at,
         )
 
     def _fetch_transactions(
@@ -121,8 +154,15 @@ class CrewReadAdapter:
                 except Exception:
                     errors.append("transaction page unavailable")
                     break
-                cash_transactions = ((data.get("account") or {}).get("cashTransactions") or {})
-                for edge in cash_transactions.get("edges") or []:
+                account = data.get("account")
+                if not isinstance(account, dict):
+                    errors.append("transaction page malformed")
+                    break
+                cash_transactions = account.get("cashTransactions")
+                if not isinstance(cash_transactions, dict) or not isinstance(cash_transactions.get("edges"), list):
+                    errors.append("transaction page malformed")
+                    break
+                for edge in cash_transactions["edges"]:
                     transaction = self._normalize_transaction(
                         edge.get("node") or {},
                         account_id,
@@ -130,10 +170,16 @@ class CrewReadAdapter:
                     )
                     if transaction is not None:
                         transactions.append(transaction)
-                page_info = cash_transactions.get("pageInfo") or {}
-                if not page_info.get("hasNextPage") or not page_info.get("endCursor"):
+                page_info = cash_transactions.get("pageInfo")
+                if not isinstance(page_info, dict):
+                    errors.append("transaction page malformed")
                     break
-                cursor = page_info["endCursor"]
+                if not page_info.get("hasNextPage"):
+                    break
+                cursor = page_info.get("endCursor")
+                if not isinstance(cursor, str) or not cursor:
+                    errors.append("transaction page malformed")
+                    break
         return transactions, errors
 
     @staticmethod
@@ -151,7 +197,16 @@ class CrewReadAdapter:
         transfer = source.get("transfer") or {}
         transfer_id = transfer.get("id")
         relation_hint = None
-        if isinstance(transfer_id, str) and transfer_id:
+        endpoints = (
+            transfer.get("accountFrom"),
+            transfer.get("accountTo"),
+        )
+        if not all(isinstance(endpoint, dict) and endpoint.get("belongsToCurrentUser") is True for endpoint in endpoints):
+            endpoints = (transfer.get("subaccountFrom"), transfer.get("subaccountTo"))
+        if isinstance(transfer_id, str) and transfer_id and all(
+            isinstance(endpoint, dict) and endpoint.get("belongsToCurrentUser") is True
+            for endpoint in endpoints
+        ):
             relation_hint = f"crew-transfer:{transfer_id}"
         return NormalizedTransaction(
             external_id=external_id,
@@ -162,5 +217,6 @@ class CrewReadAdapter:
             status=str(source.get("status") or source.get("type") or "unknown"),
             merchant=source.get("matchingName"),
             raw_description=source.get("memo") or source.get("externalMemo"),
+            source_updated_at=occurred_at,
             relation_hint=relation_hint,
         )

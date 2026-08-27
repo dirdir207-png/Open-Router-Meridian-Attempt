@@ -5,12 +5,15 @@ from meridian.providers.base import (
     NormalizedTransaction,
     ProviderSnapshot,
 )
+from meridian.providers.crew import CrewReadAdapter
 from meridian.repository import FinancialRepository
 from meridian.sync import sync_provider
 
 
 class SnapshotAdapter:
     provider_name = "crew"
+    connection_external_id = "crew-household"
+    connection_name = "Crew"
 
     def __init__(self, snapshot):
         self.snapshot = snapshot
@@ -65,6 +68,17 @@ def test_syncing_an_identical_snapshot_is_idempotent(repository):
     with repository._connect() as connection:
         runs = connection.execute("SELECT status FROM provider_sync_runs ORDER BY id").fetchall()
     assert [run["status"] for run in runs] == ["complete", "complete"]
+
+
+def test_sync_links_accounts_and_runs_to_the_same_provider_connection(repository):
+    sync_provider(SnapshotAdapter(complete_snapshot()), repository)
+
+    with repository._connect() as connection:
+        account = connection.execute("SELECT connection_id FROM financial_accounts").fetchone()
+        run = connection.execute("SELECT connection_id FROM provider_sync_runs").fetchone()
+        provider_connection = connection.execute("SELECT id FROM provider_connections").fetchone()
+
+    assert account["connection_id"] == run["connection_id"] == provider_connection["id"]
 
 
 def test_partial_sync_keeps_prior_transactions_and_last_successful_freshness(repository):
@@ -126,3 +140,84 @@ def test_failed_transaction_write_records_a_partial_sync_and_keeps_freshness(
             ("crew", "crew-household"),
         ).fetchone()
     assert connection_row["last_successful_at"] == prior_success
+
+
+def test_fetch_failure_records_a_failed_run_without_advancing_freshness(repository):
+    class FailingAdapter:
+        provider_name = "crew"
+        connection_external_id = "crew-household"
+        connection_name = "Crew"
+
+        @staticmethod
+        def fetch_snapshot():
+            raise RuntimeError("unreachable")
+
+    report = sync_provider(FailingAdapter(), repository)
+
+    assert report.status == "failed"
+    assert report.errors == 1
+    with repository._connect() as connection:
+        run = connection.execute("SELECT status FROM provider_sync_runs").fetchone()
+        provider_connection = connection.execute(
+            "SELECT last_successful_at FROM provider_connections"
+        ).fetchone()
+    assert run["status"] == "failed"
+    assert provider_connection["last_successful_at"] is None
+
+
+def test_two_page_adapter_failure_retains_first_page_and_reports_partial(repository):
+    class TwoPageClient:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, operation_name, query, variables=None, *, is_mutation=False):
+            self.calls.append((operation_name, variables))
+            if operation_name == "CurrentUser":
+                return {
+                    "currentUser": {
+                        "accounts": [
+                            {
+                                "id": "account-main",
+                                "displayName": "Household",
+                                "subaccounts": [
+                                    {
+                                        "id": "checking",
+                                        "displayName": "Checking",
+                                        "overallBalance": 5000,
+                                        "isPrimary": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            if variables["cursor"] is None:
+                return {
+                    "account": {
+                        "cashTransactions": {
+                            "edges": [
+                                {
+                                    "node": {
+                                        "id": "first-page-transaction",
+                                        "amount": -100,
+                                        "description": "Lunch",
+                                        "occurredAt": "2026-08-26T09:00:00Z",
+                                        "status": "posted",
+                                        "subaccount": {"id": "checking"},
+                                    }
+                                }
+                            ],
+                            "pageInfo": {"hasNextPage": True, "endCursor": "next-page"},
+                        }
+                    }
+                }
+            raise RuntimeError("page two unavailable")
+
+    client = TwoPageClient()
+    report = sync_provider(CrewReadAdapter(client, observed_at="2026-08-26T10:00:00Z"), repository)
+
+    transactions, _ = repository.list_transactions()
+    assert report.status == "partial"
+    assert report.errors == 1
+    assert [transaction.external_id for transaction in transactions] == ["first-page-transaction"]
+    assert client.calls[-1][1]["cursor"] == "next-page"

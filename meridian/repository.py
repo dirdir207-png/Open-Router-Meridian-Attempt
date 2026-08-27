@@ -3,11 +3,18 @@
 import base64
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from .db import run_migrations
 from .models import AccountRecord, TransactionRecord
+
+
+@dataclass(frozen=True)
+class SyncRun:
+    id: int
+    connection_id: int
 
 _ACCOUNT_COLUMNS = (
     "id, provider, external_id, name, account_type, balance, currency, "
@@ -78,6 +85,7 @@ class FinancialRepository:
         currency: str = "USD",
         available_balance: Optional[float] = None,
         is_active: bool = True,
+        connection_id: Optional[int] = None,
         source_updated_at: Optional[str] = None,
         synced_at: Optional[str] = None,
     ) -> AccountRecord:
@@ -88,10 +96,11 @@ class FinancialRepository:
                 f"""
                 INSERT INTO financial_accounts (
                     provider, external_id, name, account_type, balance,
-                    available_balance, currency, is_active, source_updated_at,
+                    connection_id, available_balance, currency, is_active, source_updated_at,
                     synced_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider, external_id) DO UPDATE SET
+                    connection_id = COALESCE(excluded.connection_id, financial_accounts.connection_id),
                     name = CASE WHEN {_ACCOUNT_FRESHNESS_CONDITION}
                         THEN excluded.name ELSE financial_accounts.name END,
                     account_type = CASE WHEN {_ACCOUNT_FRESHNESS_CONDITION}
@@ -126,6 +135,7 @@ class FinancialRepository:
                     name,
                     account_type,
                     balance,
+                    connection_id,
                     available_balance,
                     currency,
                     int(is_active),
@@ -246,7 +256,7 @@ class FinancialRepository:
         provider: str,
         connection_external_id: str,
         connection_name: str,
-    ) -> int:
+    ) -> SyncRun:
         """Record an attempted provider read without advancing freshness."""
         timestamp = _now()
         with self._connect() as connection:
@@ -276,7 +286,7 @@ class FinancialRepository:
                 """,
                 (connection_row["id"], provider, timestamp),
             )
-        return int(cursor.lastrowid)
+        return SyncRun(id=int(cursor.lastrowid), connection_id=int(connection_row["id"]))
 
     def finish_sync_run(
         self,
