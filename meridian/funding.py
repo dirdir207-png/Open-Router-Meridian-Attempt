@@ -57,6 +57,7 @@ class FundingEvent:
     amount: Decimal
     source: str
     explanation: tuple = field(default_factory=tuple)
+    desired_amount: Decimal = _ZERO
 
 
 @dataclass(frozen=True)
@@ -248,7 +249,13 @@ def project_funding(
             explanation.append(f"limited by {cap_reason}")
 
         events.append(
-            FundingEvent(date=day, amount=bounded, source=source, explanation=tuple(explanation))
+            FundingEvent(
+                date=day,
+                amount=bounded,
+                source=source,
+                explanation=tuple(explanation),
+                desired_amount=amount,
+            )
         )
         remaining_target -= bounded
         reserved_by_date[day] = reserved_by_date.get(day, _ZERO) + bounded

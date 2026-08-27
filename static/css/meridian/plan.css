@@ -1,0 +1,261 @@
+/* Plan workspace: command summary, allocation map, timeline, commitments. */
+
+.m-plan {
+  display: grid;
+  gap: var(--m-space-6);
+}
+
+.m-plan-headline {
+  font-family: var(--m-font-serif);
+  font-size: var(--m-text-xl);
+  font-weight: 500;
+  margin: 0 0 var(--m-space-4);
+}
+
+.m-coverage-bar {
+  height: 10px;
+  border-radius: var(--m-radius-pill);
+  background: var(--m-surface-muted);
+  overflow: hidden;
+}
+
+.m-coverage-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--m-healthy);
+  transition: width var(--m-motion-slow) var(--m-ease-out);
+}
+
+.m-coverage-caption {
+  margin: var(--m-space-2) 0 0;
+  color: var(--m-ink-muted);
+  font-size: var(--m-text-sm);
+}
+
+.m-plan-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--m-space-4);
+  margin: var(--m-space-5) 0 0;
+}
+
+.m-plan-stats dt {
+  font-size: var(--m-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--m-ink-faint);
+}
+
+.m-plan-stats dd {
+  margin: var(--m-space-1) 0 0;
+  font-family: var(--m-font-serif);
+  font-size: var(--m-text-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-plan-shortfall {
+  margin: var(--m-space-4) 0 0;
+  padding: var(--m-space-3) var(--m-space-4);
+  background: var(--m-caution-wash);
+  color: var(--m-caution);
+  border-radius: var(--m-radius-md);
+  font-size: var(--m-text-sm);
+}
+
+/* Allocation map */
+.m-allocation-bar {
+  display: flex;
+  height: 14px;
+  border-radius: var(--m-radius-sm);
+  overflow: hidden;
+  background: var(--m-surface-muted);
+  margin-top: var(--m-space-3);
+}
+
+.m-allocation-bar span {
+  display: block;
+  height: 100%;
+}
+
+.m-allocation-bar .is-committed {
+  background: var(--m-information);
+}
+
+.m-allocation-bar .is-unfunded {
+  background: var(--m-caution);
+}
+
+.m-allocation-bar .is-available {
+  background: var(--m-healthy);
+}
+
+.m-allocation-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--m-space-4);
+  margin: var(--m-space-3) 0 0;
+  padding: 0;
+  font-size: var(--m-text-sm);
+  color: var(--m-ink-muted);
+}
+
+.m-allocation-legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: var(--m-space-2);
+}
+
+/* Timeline */
+.m-timeline {
+  list-style: none;
+  margin: var(--m-space-3) 0 0;
+  padding: 0;
+}
+
+.m-timeline li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--m-space-4);
+  padding: var(--m-space-3) 0;
+  border-bottom: 1px solid var(--m-border);
+  font-size: var(--m-text-md);
+}
+
+.m-timeline .m-timeline-date {
+  color: var(--m-ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.m-timeline .m-timeline-amount {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Commitments */
+.m-commitment-list {
+  list-style: none;
+  margin: var(--m-space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--m-space-3);
+}
+
+.m-commitment-card {
+  border: 1px solid var(--m-border);
+  border-radius: var(--m-radius-lg);
+  background: var(--m-surface);
+  padding: var(--m-space-4) var(--m-space-5);
+}
+
+.m-commitment-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--m-space-4);
+}
+
+.m-commitment-name {
+  font-family: var(--m-font-serif);
+  font-size: var(--m-text-lg);
+  margin: 0;
+}
+
+.m-commitment-type {
+  font-size: var(--m-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--m-ink-faint);
+}
+
+.m-commitment-progress {
+  height: 6px;
+  background: var(--m-surface-muted);
+  border-radius: var(--m-radius-pill);
+  overflow: hidden;
+  margin: var(--m-space-3) 0;
+}
+
+.m-commitment-progress span {
+  display: block;
+  height: 100%;
+  background: var(--m-information);
+  border-radius: inherit;
+}
+
+.m-commitment-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--m-space-4);
+  font-size: var(--m-text-sm);
+  color: var(--m-ink-muted);
+}
+
+.m-commitment-card .m-button {
+  margin-top: var(--m-space-3);
+  min-height: 44px;
+}
+
+.m-button--quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--m-ink-muted);
+}
+
+/* Funding editor (inline card under a commitment) */
+.m-funding-editor {
+  margin-top: var(--m-space-4);
+  padding: var(--m-space-4);
+  border: 1px dashed var(--m-border-strong);
+  border-radius: var(--m-radius-md);
+  display: grid;
+  gap: var(--m-space-3);
+}
+
+.m-editor-title {
+  margin: 0;
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--m-ink-muted);
+}
+
+.m-input {
+  min-height: 44px;
+  padding: 0 var(--m-space-3);
+  border: 1px solid var(--m-border-strong);
+  border-radius: var(--m-radius-md);
+  background: var(--m-surface);
+  color: var(--m-ink);
+  font-family: var(--m-font-sans);
+  font-size: var(--m-text-md);
+}
+
+.m-editor-preview {
+  margin: 0;
+  font-size: var(--m-text-sm);
+  color: var(--m-information);
+}
+
+.m-editor-actions {
+  display: flex;
+  gap: var(--m-space-3);
+  flex-wrap: wrap;
+}
+
+.m-editor-note {
+  margin: 0;
+  font-size: var(--m-text-sm);
+  color: var(--m-healthy);
+}
+
+@media (max-width: 900px) {
+  .m-plan-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

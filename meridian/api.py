@@ -1,12 +1,16 @@
 """Stable, authenticated HTTP read models for Meridian."""
 
+from datetime import date
 from functools import wraps
 
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import login_required
 
+from meridian.commitments import CommitmentRepository
+from meridian.funding_repo import FundingRuleRepository
 from meridian.models import AccountRecord, TransactionRecord
 from meridian.services.activity import get_activity, get_transaction
+from meridian.services.plan import build_plan
 from meridian.services.today import build_today, data_freshness
 
 meridian_api = Blueprint("meridian_api", __name__)
@@ -14,6 +18,17 @@ meridian_api = Blueprint("meridian_api", __name__)
 
 def _repository():
     return current_app.config["MERIDIAN_REPOSITORY_FACTORY"]()
+
+
+def _plan_repositories():
+    graph = _repository()
+    commitments = current_app.config.get("MERIDIAN_COMMITMENTS_FACTORY")
+    rules = current_app.config.get("MERIDIAN_FUNDING_RULES_FACTORY")
+    return (
+        graph,
+        commitments() if commitments else CommitmentRepository(graph.db_path),
+        rules() if rules else FundingRuleRepository(graph.db_path),
+    )
 
 
 def _error(
@@ -95,6 +110,88 @@ def _positive_int(value: str) -> int:
     if parsed < 1:
         raise ValueError
     return parsed
+
+
+@meridian_api.get("/plan")
+@login_required
+@_safe_read
+def plan():
+    graph, commitments, rules = _plan_repositories()
+    as_of_value = request.args.get("as_of")
+    try:
+        as_of = date.fromisoformat(as_of_value) if as_of_value else date.today()
+    except ValueError:
+        return _error(
+            "invalid_request",
+            "as_of must be an ISO date (YYYY-MM-DD).",
+            "Use today's date or omit as_of.",
+            400,
+        )
+    return jsonify(build_plan(graph, commitments, rules, as_of=as_of))
+
+
+@meridian_api.get("/commitments")
+@login_required
+@_safe_read
+def commitments():
+    _graph, commitment_repository, rule_repository = _plan_repositories()
+    views = []
+    for commitment in commitment_repository.list_active():
+        views.append(
+            {
+                "id": commitment.id,
+                "type": commitment.type.value,
+                "name": commitment.name,
+                "status": commitment.status.value,
+                "priority": commitment.priority,
+                "target_amount": commitment.target_amount,
+                "amount": commitment.amount,
+                "funded_amount": commitment.funded_amount,
+                "due_date": commitment.due_date,
+                "target_date": commitment.target_date,
+                "buffer_minimum": commitment.buffer_minimum,
+                "minimum_payment": commitment.minimum_payment,
+                "backing_account_id": commitment.backing_account_id,
+                "rule_ids": [
+                    rule.id for rule in rule_repository.list_for_commitment(commitment.id)
+                ],
+            }
+        )
+    return jsonify({"commitments": views})
+
+
+@meridian_api.get("/funding-rules")
+@login_required
+@_safe_read
+def funding_rules():
+    _graph, _commitments, rule_repository = _plan_repositories()
+    views = []
+    for rule in rule_repository.list_all():
+        views.append(
+            {
+                "id": rule.id,
+                "commitment_id": rule.commitment_id,
+                "kind": rule.kind,
+                "amount": float(rule.amount) if rule.amount is not None else None,
+                "percent": float(rule.percent) if rule.percent is not None else None,
+                "cadence": rule.cadence,
+                "day_of_month": rule.day_of_month,
+                "start_date": rule.start_date.isoformat(),
+                "horizon_end": rule.horizon_end.isoformat() if rule.horizon_end else None,
+                "min_contribution": (
+                    float(rule.min_contribution) if rule.min_contribution is not None else None
+                ),
+                "max_contribution": (
+                    float(rule.max_contribution) if rule.max_contribution is not None else None
+                ),
+                "paused": rule.paused,
+                "one_time_override": (
+                    float(rule.one_time_override) if rule.one_time_override is not None else None
+                ),
+                "priority": rule.priority,
+            }
+        )
+    return jsonify({"funding_rules": views})
 
 
 @meridian_api.get("/today")

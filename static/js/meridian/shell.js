@@ -1,7 +1,7 @@
 /* Meridian shell controller.
    Exposes window.MeridianShell: workspace switching with URL persistence,
-   focus restoration, and a sheet primitive (Escape, inert background,
-   focus restore) reused by later slices. */
+   focus movement, live announcements, and a sheet primitive (Escape, inert
+   background until the final close, focus restore) reused by later slices. */
 
 (() => {
   "use strict";
@@ -22,7 +22,23 @@
     window.history.replaceState({ meridianWorkspace: workspace }, "", url);
   }
 
-  function applyWorkspace(name) {
+  function announceWorkspace(name) {
+    const announcement = document.querySelector("[data-workspace-announcement]");
+    if (announcement) {
+      const heading = document.querySelector(`#workspace-heading-${name}`);
+      announcement.textContent = `${heading ? heading.textContent : name} workspace`;
+    }
+  }
+
+  function focusWorkspaceHeading(name) {
+    const heading = document.querySelector(`#workspace-heading-${name}`);
+    if (heading && typeof heading.focus === "function") {
+      heading.focus();
+      announceWorkspace(name);
+    }
+  }
+
+  function applyWorkspace(name, options = {}) {
     if (!isValidWorkspace(name)) {
       name = DEFAULT_WORKSPACE;
     }
@@ -45,6 +61,10 @@
         detail: { workspace: name },
       })
     );
+
+    if (options.focus) {
+      focusWorkspaceHeading(name);
+    }
   }
 
   function getWorkspace() {
@@ -53,13 +73,33 @@
 
   function setWorkspace(name, options) {
     const settings = options || {};
-    applyWorkspace(name);
+    applyWorkspace(name, { focus: settings.focus || settings.announce });
     if (settings.updateUrl !== false) {
       setUrl(activeWorkspace);
     }
   }
 
   /* ---------- Sheet primitive ---------- */
+
+  function setInert(page) {
+    if (page && typeof page.inert === "boolean") {
+      page.inert = true;
+      const nav = document.querySelector("[data-primary-nav]");
+      if (nav && typeof nav.inert === "boolean") {
+        nav.inert = true;
+      }
+    }
+  }
+
+  function releaseInert(page) {
+    if (page && typeof page.inert === "boolean") {
+      page.inert = false;
+      const nav = document.querySelector("[data-primary-nav]");
+      if (nav && typeof nav.inert === "boolean") {
+        nav.inert = false;
+      }
+    }
+  }
 
   function lastFocusable(container) {
     const candidates = container.querySelectorAll(
@@ -72,14 +112,7 @@
     const modal = options.modal !== false;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (modal) {
-      const page = document.querySelector("#main");
-      if (page && typeof page.inert === "boolean") {
-        page.inert = true;
-        const nav = document.querySelector("[data-primary-nav]");
-        if (nav && typeof nav.inert === "boolean") {
-          nav.inert = true;
-        }
-      }
+      setInert(document.querySelector("#main"));
     }
     sheet.hidden = false;
     sheet.setAttribute("data-open", "");
@@ -91,7 +124,8 @@
       sheet.removeAttribute("aria-modal");
     }
 
-    const initial = sheet.querySelector("[data-sheet-initial-focus]") || lastFocusable(sheet) || sheet;
+    const initial =
+      sheet.querySelector("[data-sheet-initial-focus]") || lastFocusable(sheet) || sheet;
     initial.focus();
 
     function onKeyDown(event) {
@@ -100,18 +134,21 @@
         closeSheet();
         return;
       }
-      if (event.key === "Tab" && typeof sheet.inert === "boolean") {
-        const first = sheet.querySelector("a[href], button, input, [tabindex]:not([tabindex='-1'])");
-        if (first && event.shiftKey && document.activeElement === first) {
+      if (event.key === "Tab") {
+        const first = sheet.querySelector(
+          'a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])'
+        );
+        const last = lastFocusable(sheet);
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === sheet)) {
           event.preventDefault();
-          lastFocusable(sheet).focus();
-        } else if (
-          !event.shiftKey &&
-          lastFocusable(sheet) &&
-          document.activeElement === lastFocusable(sheet)
-        ) {
+          if (last) {
+            last.focus();
+          }
+        } else if (!event.shiftKey && last && document.activeElement === last) {
           event.preventDefault();
-          first.focus();
+          if (first) {
+            first.focus();
+          }
         }
       }
     }
@@ -136,13 +173,9 @@
       sheet.removeEventListener("keydown", sheet.__meridianSheetHandler);
       delete sheet.__meridianSheetHandler;
     }
-    const main = document.querySelector("#main");
-    if (main && typeof main.inert === "boolean") {
-      main.inert = false;
-      const nav = document.querySelector("[data-primary-nav]");
-      if (nav && typeof nav.inert === "boolean") {
-        nav.inert = false;
-      }
+    // Nested sheets keep the page inert until the final one closes.
+    if (sheetStack.length === 0) {
+      releaseInert(document.querySelector("#main"));
     }
     if (opener && typeof opener.focus === "function") {
       opener.focus();
@@ -165,7 +198,7 @@
       return;
     }
     event.preventDefault();
-    setWorkspace(link.dataset.workspace);
+    setWorkspace(link.dataset.workspace, { focus: true });
   });
 
   function initFromDom() {

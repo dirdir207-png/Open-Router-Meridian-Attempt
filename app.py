@@ -815,8 +815,44 @@ def verify_transfer_action(params, result):
     confirmed = isinstance(transfer_id, str) and bool(transfer_id.strip())
     return {"ok": confirmed, "check": "confirmed-transfer-id"}
 
+
+def _apply_funding_rule(params):
+    """Local-only write of planning metadata; never contacts Crew."""
+    from meridian.funding_repo import FundingRuleRepository
+
+    repository = FundingRuleRepository(DB_FILE)
+    rule = params.get("rule") or {}
+    rule_id = params.get("rule_id")
+    fields = {
+        key: rule[key]
+        for key in (
+            "amount", "percent", "cadence", "day_of_month", "start_date",
+            "horizon_end", "min_contribution", "max_contribution",
+            "paused", "one_time_override", "priority",
+        )
+        if key in rule
+    }
+    if rule_id:
+        stored = repository.update(int(rule_id), **fields)
+    else:
+        stored = repository.create(commitment_id=int(params["commitment_id"]), kind=rule["kind"], **fields)
+    return {"rule_id": stored.id, "kind": stored.kind}
+
+
+def verify_funding_rule_action(params, result):
+    from meridian.funding_repo import FundingRuleRepository
+
+    rule_id = (result or {}).get("rule_id")
+    if not rule_id:
+        return {"ok": False, "check": "missing-rule-id"}
+    stored = FundingRuleRepository(DB_FILE).get(int(rule_id))
+    rule = params.get("rule") or {}
+    ok = stored is not None and stored.kind == rule.get("kind")
+    return {"ok": bool(ok), "check": "funding-rule-state-reread"}
+
 action_store = ActionStore(
-    db_path=DB_FILE, allowed_types=("move_money", "scheduled_move_money")
+    db_path=DB_FILE,
+    allowed_types=("move_money", "scheduled_move_money", "update_funding_rule"),
 )
 local_proposer_key = get_or_create_local_key(DB_FILE)
 action_executors = {
@@ -829,6 +865,12 @@ action_executors = {
     "scheduled_move_money": ExecutorSpec(
         execute=lambda p: move_money(p["from_id"], p["to_id"], p["amount"], p.get("memo", "")),
         verifier=verify_transfer_action,
+    ),
+    # Funding-rule changes are local planning metadata but stay
+    # approval-gated; the executor writes locally and never contacts Crew.
+    "update_funding_rule": ExecutorSpec(
+        execute=_apply_funding_rule,
+        verifier=verify_funding_rule_action,
     ),
 }
 
@@ -3577,6 +3619,44 @@ def api_actions_propose():
     except UnknownActionTypeError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(created)
+
+@app.route('/api/meridian/funding-rules/propose', methods=['POST'])
+@login_required
+def api_meridian_funding_rule_propose():
+    """Propose a funding-rule change; the owner approves before it applies."""
+    data = request.json or {}
+    commitment_id = data.get('commitment_id')
+    rule = data.get('rule') or {}
+    if not isinstance(commitment_id, int) or not isinstance(rule, dict) or not rule.get('kind'):
+        return jsonify({"error": "commitment_id (int) and rule.kind are required"}), 400
+    rule_id = data.get('rule_id')
+    minor = rule.get('amount')
+    dedup = (
+        f"funding-rule:{rule_id if rule_id else 'new'}:{commitment_id}:{rule.get('kind')}:"
+        f"{minor if minor is not None else ''}"
+    )
+    verb = "Update" if rule_id else "Create"
+    rationale = (
+        f"{verb} a {rule.get('kind')} funding rule"
+        + (f" (${minor})" if minor is not None else "")
+        + f" for commitment #{commitment_id}. Applies locally after your approval; Crew is never contacted."
+    )
+    try:
+        created = action_store.propose(
+            'update_funding_rule',
+            {
+                'commitment_id': commitment_id,
+                'rule_id': rule_id,
+                'rule': rule,
+            },
+            rationale,
+            requested_by=getattr(current_user, 'username', 'owner'),
+            dedup_key=dedup,
+        )
+    except UnknownActionTypeError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"proposal": created})
+
 
 @app.route('/api/actions/<action_id>/approve', methods=['POST'])
 @login_required

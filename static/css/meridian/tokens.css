@@ -19,7 +19,7 @@
   /* Ink */
   --m-ink: #201d18;
   --m-ink-muted: #6d675c;
-  --m-ink-faint: #99917f;
+  --m-ink-faint: #716a5f;
 
   /* State colors */
   --m-healthy: #26714f;
@@ -39,8 +39,8 @@
   );
 
   /* Typography */
-  --m-font-serif: "Fraunces", "Source Serif 4", Georgia, "Times New Roman", serif;
-  --m-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --m-font-serif: Georgia, "Times New Roman", serif;
+  --m-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
   /* Type scale */
   --m-text-xs: 0.75rem;
@@ -94,7 +94,7 @@
 
     --m-ink: #ece7de;
     --m-ink-muted: #a89f90;
-    --m-ink-faint: #7d7566;
+    --m-ink-faint: #9f9686;
 
     --m-healthy: #55b88b;
     --m-healthy-wash: rgba(85, 184, 139, 0.14);

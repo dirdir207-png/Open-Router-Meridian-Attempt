@@ -41,6 +41,46 @@ export async function meridianFetch(path, options = {}) {
     });
   }
 
+  return _parse(response);
+}
+
+const ALLOWED_PROPOSAL_PATHS = new Set(["/api/meridian/funding-rules/propose"]);
+
+export async function meridianPropose(path, payload) {
+  /* The only write channel in the browser: it creates a pending proposal
+     for owner approval. It never executes anything and never touches Crew. */
+  if (!ALLOWED_PROPOSAL_PATHS.has(path)) {
+    throw new MeridianApiError({
+      code: "mutations_forbidden",
+      message: "This endpoint is not a proposal endpoint.",
+      recoveryAction: "Only approval-gated proposal endpoints accept writes.",
+      status: 0,
+    });
+  }
+
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      throw error;
+    }
+    throw new MeridianApiError({
+      code: "network_unreachable",
+      message: "Meridian could not reach the server.",
+      recoveryAction: "Check your connection and try again.",
+      status: 0,
+    });
+  }
+
+  return _parse(response);
+}
+
+async function _parse(response) {
   const contentType = response.headers.get("content-type") || "";
   let payload = null;
   if (contentType.includes("application/json")) {

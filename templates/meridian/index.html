@@ -8,12 +8,10 @@
   <title>Meridian</title>
   <link rel="icon" type="image/png" href="/static/images/favicon.png">
   <meta name="theme-color" content="#f6f4ef">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/meridian/tokens.css">
   <link rel="stylesheet" href="/static/css/meridian/shell.css">
   <link rel="stylesheet" href="/static/css/meridian/workspaces.css">
+  <link rel="stylesheet" href="/static/css/meridian/plan.css">
   <link rel="stylesheet" href="/static/css/meridian/inspector.css">
   <link rel="stylesheet" href="/static/css/meridian/motion.css">
 </head>
@@ -31,6 +29,7 @@
     </header>
 
     <main id="main" class="m-main" data-workspace-canvas tabindex="-1">
+      <p class="m-visually-hidden" data-workspace-announcement role="status" aria-atomic="true"></p>
       {% for name, label, subline in [
         ('today', 'Today', 'What can I safely spend now?'),
         ('plan', 'Plan', 'Commitments and how they get funded.'),
@@ -44,13 +43,15 @@
         aria-labelledby="workspace-heading-{{ name }}"
         {% if active_workspace != name %}hidden{% endif %}
       >
-        <h1 class="m-workspace-heading" id="workspace-heading-{{ name }}">{{ label }}</h1>
+        <h1 class="m-workspace-heading" id="workspace-heading-{{ name }}" tabindex="-1">{{ label }}</h1>
         <p class="m-workspace-subline">{{ subline }}</p>
       <div data-workspace-content="{{ name }}">
         {%- if name == 'today' -%}
           {% include 'meridian/partials/today.html' %}
         {%- elif name == 'activity' -%}
           {% include 'meridian/partials/activity.html' %}
+        {%- elif name == 'plan' -%}
+          {% include 'meridian/partials/plan.html' %}
         {%- else -%}
           <p class="m-empty-note">This workspace is arriving with a later slice.</p>
         {%- endif %}
@@ -67,6 +68,7 @@
   <script type="module" src="/static/js/meridian/shell.js"></script>
   <script type="module" src="/static/js/meridian/today.js"></script>
   <script type="module" src="/static/js/meridian/activity.js"></script>
+  <script type="module" src="/static/js/meridian/plan.js"></script>
   <script type="module" src="/static/js/meridian/transaction-inspector.js"></script>
 </body>
 </html>

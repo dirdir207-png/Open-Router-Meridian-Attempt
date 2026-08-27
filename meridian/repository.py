@@ -106,6 +106,7 @@ def _decode_cursor(cursor: str) -> tuple[str, int]:
 class FinancialRepository:
     def __init__(self, db_path: str):
         self._db_path = db_path
+        self.db_path = db_path
         run_migrations(db_path)
 
     def _connect(self) -> sqlite3.Connection:
