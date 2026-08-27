@@ -15,7 +15,10 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
             ("2026-08-26", 1234.56),
         )
 
-    assert run_migrations(str(db_path)) == ["001_financial_graph.sql"]
+    assert run_migrations(str(db_path)) == [
+        "001_financial_graph.sql",
+        "002_financial_integrity.sql",
+    ]
     assert run_migrations(str(db_path)) == []
 
     with sqlite3.connect(db_path) as connection:
@@ -32,7 +35,10 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
             )
         }
 
-    assert migrations == [("001", "001_financial_graph.sql")]
+    assert migrations == [
+        ("001", "001_financial_graph.sql"),
+        ("002", "002_financial_integrity.sql"),
+    ]
     assert legacy_row == ("2026-08-26", 1234.56)
     assert {
         "provider_connections",
@@ -40,6 +46,63 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
         "financial_transactions",
         "transaction_relations",
     } <= tables
+
+
+def test_financial_graph_schema_tracks_relation_freshness_and_provider_ownership(
+    tmp_path,
+):
+    db_path = tmp_path / "financial.db"
+    run_migrations(str(db_path))
+
+    with sqlite3.connect(db_path) as connection:
+        relation_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(transaction_relations)")
+        }
+        connection.execute(
+            """
+            INSERT INTO financial_accounts (
+                provider, external_id, name, account_type, balance, currency,
+                synced_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "crew",
+                "account-1",
+                "Everyday",
+                "checking",
+                1.0,
+                "USD",
+                "2026-08-26T10:00:00Z",
+                "2026-08-26T10:00:00Z",
+                "2026-08-26T10:00:00Z",
+            ),
+        )
+
+        with pytest.raises(sqlite3.IntegrityError, match="provider must match"):
+            connection.execute(
+                """
+                INSERT INTO financial_transactions (
+                    account_id, provider, external_id, amount, currency,
+                    occurred_at, description, status, synced_at, created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    "simplefin",
+                    "transaction-1",
+                    -1.0,
+                    "USD",
+                    "2026-08-26T10:00:00Z",
+                    "Lunch",
+                    "posted",
+                    "2026-08-26T10:00:00Z",
+                    "2026-08-26T10:00:00Z",
+                    "2026-08-26T10:00:00Z",
+                ),
+            )
+
+    assert {"source_updated_at", "synced_at"} <= relation_columns
 
 
 def test_failed_migration_rolls_back_and_can_resume(tmp_path, monkeypatch):
@@ -110,4 +173,46 @@ def test_applied_migration_checksum_drift_is_rejected(tmp_path, monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="checksum"):
+        run_migrations(str(db_path))
+
+
+def test_missing_applied_migration_file_is_rejected(tmp_path, monkeypatch):
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    first_path = migrations_dir / "001_first.sql"
+    first_path.write_text(
+        "CREATE TABLE first_table (id INTEGER PRIMARY KEY);\n",
+        encoding="utf-8",
+    )
+    (migrations_dir / "002_second.sql").write_text(
+        "CREATE TABLE second_table (id INTEGER PRIMARY KEY);\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(db_module, "MIGRATIONS_DIR", migrations_dir)
+    db_path = tmp_path / "missing-file.db"
+
+    run_migrations(str(db_path))
+    first_path.unlink()
+
+    with pytest.raises(RuntimeError, match="missing from migrations directory"):
+        run_migrations(str(db_path))
+
+
+def test_retroactive_migration_insertion_is_rejected(tmp_path, monkeypatch):
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "002_second.sql").write_text(
+        "CREATE TABLE second_table (id INTEGER PRIMARY KEY);\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(db_module, "MIGRATIONS_DIR", migrations_dir)
+    db_path = tmp_path / "retroactive.db"
+
+    assert run_migrations(str(db_path)) == ["002_second.sql"]
+    (migrations_dir / "001_first.sql").write_text(
+        "CREATE TABLE first_table (id INTEGER PRIMARY KEY);\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="append-only"):
         run_migrations(str(db_path))

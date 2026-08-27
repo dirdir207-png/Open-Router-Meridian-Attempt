@@ -52,6 +52,58 @@ def test_account_upsert_uses_provider_external_id_and_tracks_freshness(repositor
     assert len(repository.list_accounts()) == 2
 
 
+def test_account_upsert_preserves_newer_source_backed_data(repository):
+    original = repository.upsert_account(
+        provider="crew",
+        external_id="account-freshness",
+        name="Current account",
+        account_type="checking",
+        balance=100.0,
+        source_updated_at="2026-08-26T10:00:00Z",
+        synced_at="2026-08-26T10:01:00Z",
+    )
+
+    missing_source = repository.upsert_account(
+        provider="crew",
+        external_id="account-freshness",
+        name="Partial account",
+        account_type="checking",
+        balance=1.0,
+        source_updated_at=None,
+        synced_at="2026-08-26T10:02:00Z",
+    )
+    assert missing_source.name == original.name
+    assert missing_source.balance == original.balance
+    assert missing_source.source_updated_at == original.source_updated_at
+
+    older_source = repository.upsert_account(
+        provider="crew",
+        external_id="account-freshness",
+        name="Older account",
+        account_type="checking",
+        balance=2.0,
+        source_updated_at="2026-08-26T09:00:00Z",
+        synced_at="2026-08-26T09:01:00Z",
+    )
+    assert older_source.name == original.name
+    assert older_source.balance == original.balance
+    assert older_source.source_updated_at == original.source_updated_at
+    assert older_source.synced_at == missing_source.synced_at
+
+    newer_source = repository.upsert_account(
+        provider="crew",
+        external_id="account-freshness",
+        name="Newer account",
+        account_type="checking",
+        balance=125.0,
+        source_updated_at="2026-08-26T11:00:00Z",
+        synced_at="2026-08-26T11:01:00Z",
+    )
+    assert newer_source.name == "Newer account"
+    assert newer_source.balance == 125.0
+    assert newer_source.source_updated_at == "2026-08-26T11:00:00Z"
+
+
 def test_account_dto_is_immutable_and_json_safe(repository):
     account = repository.upsert_account(
         provider="crew",
@@ -106,10 +158,18 @@ def test_transaction_upsert_is_unique_and_json_safe(repository):
         source_updated_at="2026-08-26T12:01:00Z",
         synced_at="2026-08-26T12:02:00Z",
     )
+    other_provider_account = repository.upsert_account(
+        provider="simplefin",
+        external_id="account-1",
+        name="External checking",
+        account_type="checking",
+        balance=50.0,
+        synced_at="2026-08-26T12:03:00Z",
+    )
     other_provider = repository.upsert_transaction(
         provider="simplefin",
         external_id="transaction-1",
-        account_id=account.id,
+        account_id=other_provider_account.id,
         amount=-4.5,
         currency="USD",
         occurred_at="2026-08-24T12:00:00Z",
@@ -124,6 +184,130 @@ def test_transaction_upsert_is_unique_and_json_safe(repository):
     assert updated.source_updated_at == "2026-08-26T12:01:00Z"
     assert other_provider.id != original.id
     assert json.loads(json.dumps(updated.to_dict())) == updated.to_dict()
+
+
+def test_transaction_upsert_preserves_newer_source_backed_data(repository):
+    account = repository.upsert_account(
+        provider="crew",
+        external_id="account-freshness",
+        name="Everyday",
+        account_type="checking",
+        balance=100.0,
+        synced_at="2026-08-26T10:00:00Z",
+    )
+    original = repository.upsert_transaction(
+        provider="crew",
+        external_id="transaction-freshness",
+        account_id=account.id,
+        amount=-10.0,
+        occurred_at="2026-08-26T09:00:00Z",
+        description="Posted coffee",
+        status="posted",
+        source_updated_at="2026-08-26T10:00:00Z",
+        synced_at="2026-08-26T10:01:00Z",
+    )
+
+    missing_source = repository.upsert_transaction(
+        provider="crew",
+        external_id="transaction-freshness",
+        account_id=account.id,
+        amount=-1.0,
+        occurred_at="2026-08-26T09:00:00Z",
+        description="Partial coffee",
+        status="pending",
+        source_updated_at=None,
+        synced_at="2026-08-26T10:02:00Z",
+    )
+    assert missing_source.description == original.description
+    assert missing_source.status == original.status
+    assert missing_source.source_updated_at == original.source_updated_at
+
+    older_source = repository.upsert_transaction(
+        provider="crew",
+        external_id="transaction-freshness",
+        account_id=account.id,
+        amount=-2.0,
+        occurred_at="2026-08-26T09:00:00Z",
+        description="Older coffee",
+        status="pending",
+        source_updated_at="2026-08-26T09:00:00Z",
+        synced_at="2026-08-26T09:01:00Z",
+    )
+    assert older_source.description == original.description
+    assert older_source.status == original.status
+    assert older_source.source_updated_at == original.source_updated_at
+    assert older_source.synced_at == missing_source.synced_at
+
+    newer_source = repository.upsert_transaction(
+        provider="crew",
+        external_id="transaction-freshness",
+        account_id=account.id,
+        amount=-12.0,
+        occurred_at="2026-08-26T09:00:00Z",
+        description="Corrected coffee",
+        status="reversed",
+        source_updated_at="2026-08-26T11:00:00Z",
+        synced_at="2026-08-26T11:01:00Z",
+    )
+    assert newer_source.description == "Corrected coffee"
+    assert newer_source.status == "reversed"
+    assert newer_source.source_updated_at == "2026-08-26T11:00:00Z"
+
+
+def test_transaction_upsert_rejects_mismatched_account_provider(repository):
+    crew_account = repository.upsert_account(
+        provider="crew",
+        external_id="crew-account",
+        name="Crew checking",
+        account_type="checking",
+        balance=100.0,
+        synced_at="2026-08-26T10:00:00Z",
+    )
+    simplefin_account = repository.upsert_account(
+        provider="simplefin",
+        external_id="simplefin-account",
+        name="SimpleFin checking",
+        account_type="checking",
+        balance=100.0,
+        synced_at="2026-08-26T10:00:00Z",
+    )
+    original = repository.upsert_transaction(
+        provider="crew",
+        external_id="crew-transaction",
+        account_id=crew_account.id,
+        amount=-1.0,
+        occurred_at="2026-08-26T10:00:00Z",
+        description="Original",
+        status="posted",
+        synced_at="2026-08-26T10:00:00Z",
+    )
+
+    with pytest.raises(ValueError, match="provider must match"):
+        repository.upsert_transaction(
+            provider="simplefin",
+            external_id="invalid-insert",
+            account_id=crew_account.id,
+            amount=-1.0,
+            occurred_at="2026-08-26T10:00:00Z",
+            description="Invalid",
+            status="posted",
+            synced_at="2026-08-26T10:00:00Z",
+        )
+
+    with pytest.raises(ValueError, match="provider must match"):
+        repository.upsert_transaction(
+            provider="crew",
+            external_id="crew-transaction",
+            account_id=simplefin_account.id,
+            amount=-2.0,
+            occurred_at="2026-08-26T10:00:00Z",
+            description="Invalid reassignment",
+            status="reversed",
+            synced_at="2026-08-26T10:01:00Z",
+        )
+
+    records, _ = repository.list_transactions(account_id=crew_account.id)
+    assert records == [original]
 
 
 def test_transaction_pagination_and_account_filter_use_stable_order(repository):

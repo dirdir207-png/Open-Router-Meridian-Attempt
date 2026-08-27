@@ -19,6 +19,20 @@ _TRANSACTION_COLUMNS = (
     "posted_at, description, merchant, status, raw_description, "
     "source_updated_at, synced_at, created_at, updated_at"
 )
+_ACCOUNT_FRESHNESS_CONDITION = """
+    financial_accounts.source_updated_at IS NULL
+    OR (
+        excluded.source_updated_at IS NOT NULL
+        AND excluded.source_updated_at > financial_accounts.source_updated_at
+    )
+"""
+_TRANSACTION_FRESHNESS_CONDITION = """
+    financial_transactions.source_updated_at IS NULL
+    OR (
+        excluded.source_updated_at IS NOT NULL
+        AND excluded.source_updated_at > financial_transactions.source_updated_at
+    )
+"""
 
 
 def _now() -> str:
@@ -71,22 +85,40 @@ class FinancialRepository:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
-                """
+                f"""
                 INSERT INTO financial_accounts (
                     provider, external_id, name, account_type, balance,
                     available_balance, currency, is_active, source_updated_at,
                     synced_at, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider, external_id) DO UPDATE SET
-                    name = excluded.name,
-                    account_type = excluded.account_type,
-                    balance = excluded.balance,
-                    available_balance = excluded.available_balance,
-                    currency = excluded.currency,
-                    is_active = excluded.is_active,
-                    source_updated_at = excluded.source_updated_at,
-                    synced_at = excluded.synced_at,
-                    updated_at = excluded.updated_at
+                    name = CASE WHEN {_ACCOUNT_FRESHNESS_CONDITION}
+                        THEN excluded.name ELSE financial_accounts.name END,
+                    account_type = CASE WHEN {_ACCOUNT_FRESHNESS_CONDITION}
+                        THEN excluded.account_type ELSE financial_accounts.account_type END,
+                    balance = CASE WHEN {_ACCOUNT_FRESHNESS_CONDITION}
+                        THEN excluded.balance ELSE financial_accounts.balance END,
+                    available_balance = CASE WHEN {_ACCOUNT_FRESHNESS_CONDITION}
+                        THEN excluded.available_balance
+                        ELSE financial_accounts.available_balance END,
+                    currency = CASE WHEN {_ACCOUNT_FRESHNESS_CONDITION}
+                        THEN excluded.currency ELSE financial_accounts.currency END,
+                    is_active = CASE WHEN {_ACCOUNT_FRESHNESS_CONDITION}
+                        THEN excluded.is_active ELSE financial_accounts.is_active END,
+                    source_updated_at = CASE
+                        WHEN excluded.source_updated_at IS NOT NULL
+                            AND {_ACCOUNT_FRESHNESS_CONDITION}
+                        THEN excluded.source_updated_at
+                        ELSE financial_accounts.source_updated_at
+                    END,
+                    synced_at = CASE WHEN excluded.synced_at > financial_accounts.synced_at
+                        THEN excluded.synced_at ELSE financial_accounts.synced_at END,
+                    updated_at = CASE
+                        WHEN {_ACCOUNT_FRESHNESS_CONDITION}
+                            OR excluded.synced_at > financial_accounts.synced_at
+                        THEN excluded.updated_at
+                        ELSE financial_accounts.updated_at
+                    END
                 """,
                 (
                     provider,
@@ -131,8 +163,14 @@ class FinancialRepository:
         timestamp = synced_at or _now()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            matching_account = connection.execute(
+                "SELECT 1 FROM financial_accounts WHERE id = ? AND provider = ?",
+                (account_id, provider),
+            ).fetchone()
+            if matching_account is None:
+                raise ValueError("Transaction provider must match account provider")
             connection.execute(
-                """
+                f"""
                 INSERT INTO financial_transactions (
                     provider, external_id, account_id, amount, currency,
                     occurred_at, posted_at, description, merchant, status,
@@ -140,18 +178,41 @@ class FinancialRepository:
                     updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider, external_id) DO UPDATE SET
-                    account_id = excluded.account_id,
-                    amount = excluded.amount,
-                    currency = excluded.currency,
-                    occurred_at = excluded.occurred_at,
-                    posted_at = excluded.posted_at,
-                    description = excluded.description,
-                    merchant = excluded.merchant,
-                    status = excluded.status,
-                    raw_description = excluded.raw_description,
-                    source_updated_at = excluded.source_updated_at,
-                    synced_at = excluded.synced_at,
-                    updated_at = excluded.updated_at
+                    account_id = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.account_id ELSE financial_transactions.account_id END,
+                    amount = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.amount ELSE financial_transactions.amount END,
+                    currency = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.currency ELSE financial_transactions.currency END,
+                    occurred_at = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.occurred_at ELSE financial_transactions.occurred_at END,
+                    posted_at = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.posted_at ELSE financial_transactions.posted_at END,
+                    description = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.description ELSE financial_transactions.description END,
+                    merchant = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.merchant ELSE financial_transactions.merchant END,
+                    status = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.status ELSE financial_transactions.status END,
+                    raw_description = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.raw_description
+                        ELSE financial_transactions.raw_description END,
+                    source_updated_at = CASE
+                        WHEN excluded.source_updated_at IS NOT NULL
+                            AND {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN excluded.source_updated_at
+                        ELSE financial_transactions.source_updated_at
+                    END,
+                    synced_at = CASE
+                        WHEN excluded.synced_at > financial_transactions.synced_at
+                        THEN excluded.synced_at ELSE financial_transactions.synced_at
+                    END,
+                    updated_at = CASE
+                        WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                            OR excluded.synced_at > financial_transactions.synced_at
+                        THEN excluded.updated_at
+                        ELSE financial_transactions.updated_at
+                    END
                 """,
                 (
                     provider,

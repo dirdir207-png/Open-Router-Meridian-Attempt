@@ -50,6 +50,43 @@ def _checksum(script: str) -> str:
     return hashlib.sha256(script.encode("utf-8")).hexdigest()
 
 
+def _validate_migration_history(
+    connection: sqlite3.Connection, migrations: list[tuple[str, Path]]
+) -> set[str]:
+    migration_by_version = {version: path for version, path in migrations}
+    applied_rows = connection.execute(
+        "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
+    ).fetchall()
+    applied_versions = {row[0] for row in applied_rows}
+
+    for version, name, checksum in applied_rows:
+        path = migration_by_version.get(version)
+        if path is None:
+            raise RuntimeError(
+                f"Applied migration {version} is missing from migrations directory"
+            )
+        if name != path.name or checksum != _checksum(path.read_text(encoding="utf-8")):
+            raise RuntimeError(
+                f"Applied migration {version} has a name or checksum mismatch"
+            )
+
+    if applied_versions:
+        high_water_mark = max(applied_versions)
+        retroactive_versions = [
+            version
+            for version, _ in migrations
+            if version not in applied_versions and version <= high_water_mark
+        ]
+        if retroactive_versions:
+            raise RuntimeError(
+                "Migration history is append-only; pending migration versions at "
+                f"or below applied high-water mark {high_water_mark}: "
+                f"{', '.join(retroactive_versions)}"
+            )
+
+    return applied_versions
+
+
 def run_migrations(db_path: str) -> list[str]:
     """Apply pending migrations in filename order and return applied names.
 
@@ -67,6 +104,15 @@ def run_migrations(db_path: str) -> list[str]:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute(_MIGRATION_TABLE_SQL)
         connection.commit()
+
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            _validate_migration_history(connection, migrations)
+            connection.commit()
+        except BaseException:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
 
         for version, path in migrations:
             script = path.read_text(encoding="utf-8")
