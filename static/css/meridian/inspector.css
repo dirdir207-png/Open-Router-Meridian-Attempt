@@ -1,0 +1,116 @@
+/* Transaction inspector: desktop side panel, mobile full-screen detail. */
+
+.m-inspector-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.m-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--m-space-3);
+  padding-bottom: var(--m-space-4);
+  border-bottom: 1px solid var(--m-border);
+}
+
+.m-icon-button {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--m-border);
+  border-radius: var(--m-radius-md);
+  background: var(--m-surface);
+  color: var(--m-ink);
+}
+
+.m-icon-button:hover {
+  background: var(--m-surface-muted);
+}
+
+.m-inspector-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  padding-top: var(--m-space-4);
+}
+
+.m-inspector-title {
+  font-family: var(--m-font-serif);
+  font-weight: 500;
+  font-size: var(--m-text-xl);
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--m-space-2);
+}
+
+.m-inspector-title:focus-visible {
+  outline: none;
+  box-shadow: var(--m-focus-ring);
+  border-radius: var(--m-radius-sm);
+}
+
+.m-inspector-provider-line {
+  display: flex;
+  align-items: center;
+  gap: var(--m-space-3);
+  margin: 0 0 var(--m-space-5);
+  color: var(--m-ink-muted);
+  font-size: var(--m-text-sm);
+  text-transform: capitalize;
+}
+
+.m-facts {
+  margin: 0 0 var(--m-space-5);
+  display: grid;
+  gap: 0;
+}
+
+.m-fact {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: var(--m-space-3);
+  padding: var(--m-space-3) 0;
+  border-bottom: 1px solid var(--m-border);
+}
+
+.m-fact dt {
+  font-size: var(--m-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--m-ink-faint);
+  padding-top: 2px;
+}
+
+.m-fact dd {
+  margin: 0;
+  font-size: var(--m-text-md);
+  color: var(--m-ink);
+  overflow-wrap: anywhere;
+}
+
+.m-fact[data-fact="amount"] dd {
+  font-family: var(--m-font-serif);
+  font-size: var(--m-text-xl);
+}
+
+.m-inspector-section {
+  margin: 0 0 var(--m-space-5);
+}
+
+.m-inspector-section h3 {
+  font-size: var(--m-text-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--m-ink-muted);
+  margin: 0 0 var(--m-space-2);
+}
+
+.m-state-line {
+  margin: 0;
+  font-size: var(--m-text-md);
+  color: var(--m-ink-muted);
+}

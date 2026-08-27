@@ -11,6 +11,15 @@ function buildRow(transaction) {
   row.dataset.transactionRow = "";
   row.dataset.transactionId = String(transaction.id);
   row.dataset.kind = transaction.amount < 0 ? "spend" : "income";
+  row.setAttribute("role", "button");
+  row.setAttribute("tabindex", "0");
+  row.setAttribute(
+    "aria-label",
+    `${transaction.merchant || transaction.description}, ${formatCurrency(
+      transaction.amount,
+      transaction.currency
+    )}. Open details.`
+  );
 
   const left = document.createElement("span");
   left.className = "m-row-text";

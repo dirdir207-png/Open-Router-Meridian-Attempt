@@ -201,6 +201,8 @@
   padding: var(--m-space-3) var(--m-space-2);
   border-bottom: 1px solid var(--m-border);
   text-align: left;
+  cursor: pointer;
+  border-radius: var(--m-radius-sm);
 }
 
 [data-day-rows] > .m-transaction-row:last-child {

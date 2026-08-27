@@ -1,0 +1,62 @@
+<div class="m-inspector-inner" data-inspector-body>
+  <div class="m-inspector-head">
+    <span class="m-section-label">Transaction</span>
+    <button
+      type="button"
+      class="m-icon-button"
+      data-inspector-close
+      data-sheet-initial-focus
+      aria-label="Close transaction details"
+    >
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="m-inspector-scroll">
+    <h2 class="m-inspector-title" data-inspector-title tabindex="-1"></h2>
+
+    <p class="m-inspector-provider-line">
+      <span data-inspector-provider></span>
+      <span class="m-chip" data-freshness data-state="unavailable"></span>
+    </p>
+
+    <dl class="m-facts">
+      <div class="m-fact" data-fact="merchant"><dt>Merchant</dt><dd></dd></div>
+      <div class="m-fact" data-fact="description"><dt>Raw description</dt><dd></dd></div>
+      <div class="m-fact" data-fact="amount"><dt>Amount</dt><dd></dd></div>
+      <div class="m-fact" data-fact="date"><dt>Date</dt><dd></dd></div>
+      <div class="m-fact" data-fact="status"><dt>Status</dt><dd></dd></div>
+      <div class="m-fact" data-fact="account"><dt>Account</dt><dd></dd></div>
+    </dl>
+
+    <section class="m-inspector-section" aria-label="Classification">
+      <h3>Classification</h3>
+      <p class="m-state-line" data-category-state>Unassigned</p>
+      <p class="m-state-line" data-commitment-state>No linked commitment</p>
+    </section>
+
+    <section class="m-inspector-section" aria-label="Recurrence">
+      <h3>Recurrence</h3>
+      <p class="m-state-line" data-recurrence-state>No recurrence detected</p>
+    </section>
+
+    <section class="m-inspector-section" aria-label="Related transfers">
+      <h3>Related transfers</h3>
+      <p class="m-state-line" data-transfers-state>No related transfers</p>
+    </section>
+
+    <section class="m-inspector-section" aria-label="Notes">
+      <h3>Notes</h3>
+      <p class="m-state-line" data-notes-state>No notes yet</p>
+    </section>
+
+    <section class="m-inspector-section" aria-label="Plan impact">
+      <h3>Plan impact</h3>
+      <p class="m-state-line" data-impact-state>
+        Impact appears once Meridian links this transaction to your commitments.
+      </p>
+    </section>
+  </div>
+</div>

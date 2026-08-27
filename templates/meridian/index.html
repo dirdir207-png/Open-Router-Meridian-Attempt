@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="/static/css/meridian/tokens.css">
   <link rel="stylesheet" href="/static/css/meridian/shell.css">
   <link rel="stylesheet" href="/static/css/meridian/workspaces.css">
+  <link rel="stylesheet" href="/static/css/meridian/inspector.css">
   <link rel="stylesheet" href="/static/css/meridian/motion.css">
 </head>
 <body>
@@ -59,12 +60,13 @@
     </main>
 
     <aside class="m-inspector" data-inspector-rail aria-label="Details" hidden>
-      {# Filled by later slices: transaction inspector, contextual advisor rail. #}
+      {% include 'meridian/partials/transaction-inspector.html' %}
     </aside>
   </div>
 
   <script type="module" src="/static/js/meridian/shell.js"></script>
   <script type="module" src="/static/js/meridian/today.js"></script>
   <script type="module" src="/static/js/meridian/activity.js"></script>
+  <script type="module" src="/static/js/meridian/transaction-inspector.js"></script>
 </body>
 </html>

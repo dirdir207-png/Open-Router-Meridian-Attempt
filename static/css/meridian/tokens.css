@@ -1,6 +1,13 @@
 /* Meridian design tokens — Editorial Wealth supported by Quiet Precision.
    Light and dark themes are designed independently; never inherit legacy palettes. */
 
+/* Standalone Meridian surface: sizes include padding and borders. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 :root {
   /* Warm neutral surfaces */
   --m-canvas: #f6f4ef;

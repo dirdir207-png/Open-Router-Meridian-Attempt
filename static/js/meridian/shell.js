@@ -68,21 +68,28 @@
     return candidates.length ? candidates[candidates.length - 1] : null;
   }
 
-  function openSheet(sheet) {
+  function openSheet(sheet, options = {}) {
+    const modal = options.modal !== false;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const page = document.querySelector("#main");
-    if (page && typeof page.inert === "boolean") {
-      page.inert = true;
-      const nav = document.querySelector("[data-primary-nav]");
-      if (nav && typeof nav.inert === "boolean") {
-        nav.setAttribute("data-was-inert", "0");
-        nav.inert = true;
+    if (modal) {
+      const page = document.querySelector("#main");
+      if (page && typeof page.inert === "boolean") {
+        page.inert = true;
+        const nav = document.querySelector("[data-primary-nav]");
+        if (nav && typeof nav.inert === "boolean") {
+          nav.inert = true;
+        }
       }
     }
     sheet.hidden = false;
     sheet.setAttribute("data-open", "");
-    sheet.setAttribute("role", "dialog");
-    sheet.setAttribute("aria-modal", "true");
+    if (modal) {
+      sheet.setAttribute("role", "dialog");
+      sheet.setAttribute("aria-modal", "true");
+    } else {
+      sheet.setAttribute("role", "complementary");
+      sheet.removeAttribute("aria-modal");
+    }
 
     const initial = sheet.querySelector("[data-sheet-initial-focus]") || lastFocusable(sheet) || sheet;
     initial.focus();
@@ -123,9 +130,19 @@
     const { sheet, opener } = entry;
     sheet.hidden = true;
     sheet.removeAttribute("data-open");
+    sheet.removeAttribute("role");
+    sheet.removeAttribute("aria-modal");
     if (sheet.__meridianSheetHandler) {
       sheet.removeEventListener("keydown", sheet.__meridianSheetHandler);
       delete sheet.__meridianSheetHandler;
+    }
+    const main = document.querySelector("#main");
+    if (main && typeof main.inert === "boolean") {
+      main.inert = false;
+      const nav = document.querySelector("[data-primary-nav]");
+      if (nav && typeof nav.inert === "boolean") {
+        nav.inert = false;
+      }
     }
     if (opener && typeof opener.focus === "function") {
       opener.focus();
