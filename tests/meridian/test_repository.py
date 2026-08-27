@@ -439,7 +439,17 @@ def test_transaction_ordering_uses_fixed_width_fractional_utc_storage(repository
     ]
 
 
-def test_transaction_write_rejects_more_than_microsecond_precision(repository):
+@pytest.mark.parametrize(
+    "occurred_at",
+    [
+        "2026-08-27T08:00:00.1234567Z",
+        "2026-08-27t08:00:00.1234567+00:00",
+        "2026-08-27X08:00:00.1234567+00:00",
+    ],
+)
+def test_transaction_write_rejects_more_than_microsecond_precision(
+    repository, occurred_at
+):
     account = repository.upsert_account(
         provider="crew",
         external_id="precision-account",
@@ -454,7 +464,7 @@ def test_transaction_write_rejects_more_than_microsecond_precision(repository):
             external_id="too-precise",
             account_id=account.id,
             amount=-1.0,
-            occurred_at="2026-08-27T08:00:00.1234567Z",
+            occurred_at=occurred_at,
             description="Too precise",
             status="posted",
         )

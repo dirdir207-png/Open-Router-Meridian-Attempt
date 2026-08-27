@@ -452,3 +452,35 @@ def test_invalid_legacy_timestamp_is_quarantined_without_blocking_reads(
 
     assert row == ("legacy-not-a-time", 0, "2026-08-27T08:00:00Z#legacy")
     assert migration == (1,)
+
+
+@pytest.mark.parametrize(
+    "legacy_timestamp",
+    [
+        "2026-08-27t08:00:00.1234567+00:00",
+        "2026-08-27X08:00:00.1234567+00:00",
+    ],
+)
+def test_timestamp_migration_quarantines_unsupported_high_precision_separators(
+    tmp_path, monkeypatch, legacy_timestamp
+):
+    db_path = tmp_path / "unsupported-precision-timestamp.db"
+    _create_pre_timestamp_migration_database(db_path, tmp_path, monkeypatch)
+    transaction_id = _seed_legacy_transaction(
+        db_path,
+        occurred_at=legacy_timestamp,
+        source_updated_at="2026-08-27T08:00:00Z#unsupported-precision",
+    )
+
+    assert run_migrations(str(db_path)) == ["004_canonical_transaction_timestamps.sql"]
+
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT occurred_at, occurred_at_valid, source_updated_at
+            FROM financial_transactions WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+
+    assert row == (legacy_timestamp, 0, "2026-08-27T08:00:00Z#unsupported-precision")
