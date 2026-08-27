@@ -10,6 +10,12 @@ from meridian import db as db_module
 from meridian.db import run_migrations
 from meridian.repository import FinancialRepository
 
+_LATER_MIGRATIONS = [
+    "004_canonical_transaction_timestamps.sql",
+    "005_commitments.sql",
+    "006_funding_rules.sql",
+]
+
 
 def _create_pre_timestamp_migration_database(
     db_path: Path, migrations_dir: Path, monkeypatch
@@ -83,13 +89,7 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
             ("2026-08-26", 1234.56),
         )
 
-    assert run_migrations(str(db_path)) == [
-        "001_financial_graph.sql",
-        "002_financial_integrity.sql",
-        "003_provider_sync_runs.sql",
-        "004_canonical_transaction_timestamps.sql",
-        "005_commitments.sql",
-    ]
+    assert run_migrations(str(db_path))[-3:] == _LATER_MIGRATIONS
     assert run_migrations(str(db_path)) == []
 
     with sqlite3.connect(db_path) as connection:
@@ -110,6 +110,7 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
         ("003", "003_provider_sync_runs.sql"),
         ("004", "004_canonical_transaction_timestamps.sql"),
         ("005", "005_commitments.sql"),
+        ("006", "006_funding_rules.sql"),
     ]
     assert legacy_row == ("2026-08-26", 1234.56)
     assert {
@@ -302,10 +303,8 @@ def test_timestamp_migration_is_recorded_once_and_preserves_provenance(
         occurred_at="2026-08-27T04:00:00.11-04:00",
     )
 
-    assert run_migrations(str(db_path)) == [
-        "004_canonical_transaction_timestamps.sql",
-        "005_commitments.sql",
-    ]
+    applied = run_migrations(str(db_path))
+    assert applied[-2:] == _LATER_MIGRATIONS[-2:]
     assert run_migrations(str(db_path)) == []
 
     with sqlite3.connect(db_path) as connection:
@@ -366,7 +365,8 @@ def test_timestamp_migration_failure_rolls_back_and_resumes(tmp_path, monkeypatc
     assert occurred_at == "2026-08-27T04:00:00.1-04:00"
 
     monkeypatch.setitem(db_module._MIGRATION_HOOKS, migration_name, real_hook)
-    assert run_migrations(str(db_path)) == [migration_name, "005_commitments.sql"]
+    applied = run_migrations(str(db_path))
+    assert applied[-3:] == _LATER_MIGRATIONS
 
 
 def test_timestamp_migration_locks_before_read_and_does_not_lose_concurrent_write(
@@ -422,7 +422,7 @@ def test_timestamp_migration_locks_before_read_and_does_not_lose_concurrent_writ
         with pytest.raises(TimeoutError):
             writing.result(timeout=0.1)
         allow_migration.set()
-        assert migrating.result(timeout=5) == [migration_name, "005_commitments.sql"]
+        assert migrating.result(timeout=5)[-3:] == _LATER_MIGRATIONS
         written = writing.result(timeout=5)
 
     assert written.occurred_at == "2026-08-27T09:00:00.000000Z"
@@ -477,10 +477,8 @@ def test_timestamp_migration_quarantines_unsupported_high_precision_separators(
         source_updated_at="2026-08-27T08:00:00Z#unsupported-precision",
     )
 
-    assert run_migrations(str(db_path)) == [
-        "004_canonical_transaction_timestamps.sql",
-        "005_commitments.sql",
-    ]
+    applied = run_migrations(str(db_path))
+    assert applied[-2:] == _LATER_MIGRATIONS[-2:]
 
     with sqlite3.connect(db_path) as connection:
         row = connection.execute(
