@@ -1,5 +1,6 @@
 """Read-only Activity access backed exclusively by FinancialRepository."""
 
+from datetime import datetime
 from typing import Optional
 
 from meridian.models import TransactionRecord
@@ -13,6 +14,7 @@ def get_activity(
     limit: int = 50,
     cursor: Optional[str] = None,
     account_id: Optional[int] = None,
+    now: Optional[datetime] = None,
 ) -> dict[str, object]:
     """Return one stable repository page plus the graph's freshness state."""
     transactions, next_cursor = repository.list_transactions(
@@ -23,7 +25,11 @@ def get_activity(
     return {
         "transactions": transactions,
         "next_cursor": next_cursor,
-        "data_freshness": data_freshness(repository.list_accounts()),
+        "data_freshness": data_freshness(
+            repository,
+            transaction_ids=[transaction.id for transaction in transactions],
+            now=now,
+        ),
     }
 
 

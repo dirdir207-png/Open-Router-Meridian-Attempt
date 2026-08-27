@@ -1,6 +1,9 @@
+import base64
+import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import pytest
@@ -129,6 +132,83 @@ def test_meridian_activity_rejects_invalid_pagination_with_a_stable_error(api_cl
         "message": "limit must be an integer between 1 and 200.",
         "recovery_action": "Use a limit between 1 and 200 and try again.",
     }
+
+
+def _cursor(payload):
+    return base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "not-base64",
+        _cursor(["not-a-timestamp", 1]),
+        _cursor([1, 1]),
+        _cursor(["2026-08-27T08:00:00", 1]),
+        _cursor(["2026-08-27T08:00:00Z", True]),
+        _cursor(["2026-08-27T08:00:00Z", 0]),
+        _cursor(["2026-08-27T08:00:00Z", 1, "extra"]),
+        base64.urlsafe_b64encode(b'["2026-08-27T08:00:00Z", 1]').decode("ascii"),
+    ],
+)
+def test_meridian_activity_rejects_malformed_or_noncanonical_cursors(api_client, cursor):
+    client, _ = api_client
+
+    response = client.get("/api/meridian/activity", query_string={"cursor": cursor})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == {
+        "code": "invalid_request",
+        "message": "The activity cursor is invalid.",
+        "recovery_action": "Restart from the first Activity page and try again.",
+    }
+
+
+@pytest.mark.parametrize("account_id", ["not-a-number", "0", "-1"])
+def test_meridian_activity_names_an_invalid_account_filter(api_client, account_id):
+    client, _ = api_client
+
+    response = client.get("/api/meridian/activity", query_string={"account_id": account_id})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == {
+        "code": "invalid_request",
+        "message": "account_id must be a positive integer.",
+        "recovery_action": "Use a positive account_id and try again.",
+    }
+
+
+def test_meridian_missing_transaction_keeps_last_known_good_freshness(api_client):
+    client, repository = api_client
+    now = datetime.now(timezone.utc).isoformat()
+    run = repository.begin_sync_run(
+        provider="crew",
+        connection_external_id="crew-household",
+        connection_name="Crew",
+    )
+    repository.upsert_account(
+        provider="crew",
+        external_id="checking",
+        name="Checking",
+        account_type="checking",
+        balance=100.0,
+        connection_id=run.connection_id,
+        source_updated_at=now,
+    )
+    repository.finish_sync_run(
+        run.id,
+        status="complete",
+        accounts_synced=1,
+        transactions_synced=0,
+        errors=0,
+    )
+
+    response = client.get("/api/meridian/transactions/99999")
+
+    assert response.status_code == 404
+    assert response.get_json()["data_freshness"]["status"] == "fresh"
 
 
 def test_meridian_api_hides_repository_failures_behind_a_stable_error(api_client, monkeypatch):

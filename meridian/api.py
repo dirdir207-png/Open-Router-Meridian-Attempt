@@ -16,7 +16,14 @@ def _repository():
     return current_app.config["MERIDIAN_REPOSITORY_FACTORY"]()
 
 
-def _error(code: str, message: str, recovery_action: str, status: int):
+def _error(
+    code: str,
+    message: str,
+    recovery_action: str,
+    status: int,
+    *,
+    freshness: dict[str, object] | None = None,
+):
     return (
         jsonify(
             {
@@ -25,7 +32,8 @@ def _error(code: str, message: str, recovery_action: str, status: int):
                     "message": message,
                     "recovery_action": recovery_action,
                 },
-                "data_freshness": {"status": "unavailable", "last_updated_at": None},
+                "data_freshness": freshness
+                or {"status": "unavailable", "last_updated_at": None},
             }
         ),
         status,
@@ -105,7 +113,10 @@ def accounts():
     return jsonify(
         {
             "accounts": [_account_payload(account) for account in records],
-            "data_freshness": data_freshness(records),
+            "data_freshness": data_freshness(
+                repository,
+                account_ids=[account.id for account in records],
+            ),
         }
     )
 
@@ -119,13 +130,21 @@ def activity():
         limit = _positive_int(limit_value)
         if limit > 200:
             raise ValueError
-        account_id_value = request.args.get("account_id")
-        account_id = _positive_int(account_id_value) if account_id_value else None
     except ValueError:
         return _error(
             "invalid_request",
             "limit must be an integer between 1 and 200.",
             "Use a limit between 1 and 200 and try again.",
+            400,
+        )
+    account_id_value = request.args.get("account_id")
+    try:
+        account_id = _positive_int(account_id_value) if account_id_value else None
+    except ValueError:
+        return _error(
+            "invalid_request",
+            "account_id must be a positive integer.",
+            "Use a positive account_id and try again.",
             400,
         )
 
@@ -174,10 +193,14 @@ def transaction_detail(transaction_id: str):
             "The requested transaction is not available.",
             "Return to Activity and choose another transaction.",
             404,
+            freshness=data_freshness(repository),
         )
     return jsonify(
         {
             "transaction": _transaction_payload(transaction),
-            "data_freshness": data_freshness(repository.list_accounts()),
+            "data_freshness": data_freshness(
+                repository,
+                transaction_ids=[transaction.id],
+            ),
         }
     )

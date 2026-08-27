@@ -5,7 +5,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
 from .db import run_migrations
 from .models import AccountRecord, TransactionRecord
@@ -15,6 +15,17 @@ from .models import AccountRecord, TransactionRecord
 class SyncRun:
     id: int
     connection_id: int
+
+
+@dataclass(frozen=True)
+class ProviderConnectionFreshness:
+    """The complete-sync state and source timestamps behind a read model."""
+
+    connection_id: int
+    provider: str
+    status: str
+    last_successful_at: Optional[str]
+    source_updated_at: tuple[Optional[str], ...]
 
 _ACCOUNT_COLUMNS = (
     "id, provider, external_id, name, account_type, balance, currency, "
@@ -53,9 +64,24 @@ def _encode_cursor(occurred_at: str, record_id: int) -> str:
 
 def _decode_cursor(cursor: str) -> tuple[str, int]:
     try:
-        payload = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
-        occurred_at, record_id = json.loads(payload)
-        if not isinstance(occurred_at, str) or not isinstance(record_id, int):
+        encoded = cursor.encode("ascii")
+        payload = base64.b64decode(encoded, altchars=b"-_", validate=True)
+        if base64.urlsafe_b64encode(payload) != encoded:
+            raise ValueError
+        occurred_at, record_id = json.loads(payload.decode("utf-8"))
+        if (
+            not isinstance(occurred_at, str)
+            or type(record_id) is not int
+            or record_id < 1
+        ):
+            raise ValueError
+        timestamp = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            raise ValueError
+        canonical_payload = json.dumps(
+            [occurred_at, record_id], separators=(",", ":")
+        ).encode("utf-8")
+        if payload != canonical_payload:
             raise ValueError
     except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError("Invalid transaction cursor") from exc
@@ -387,6 +413,77 @@ class FinancialRepository:
                 (transaction_id,),
             ).fetchone()
         return self._transaction_from_row(row) if row is not None else None
+
+    def list_connection_freshness(
+        self,
+        *,
+        account_ids: Optional[Sequence[int]] = None,
+        transaction_ids: Optional[Sequence[int]] = None,
+    ) -> list[ProviderConnectionFreshness]:
+        """Return complete-sync markers and account source times for a read scope."""
+        if account_ids is not None and transaction_ids is not None:
+            raise ValueError("Specify account_ids or transaction_ids, not both")
+        if account_ids is not None and not account_ids:
+            return []
+        if transaction_ids is not None and not transaction_ids:
+            return []
+
+        parameters: list[object] = []
+        if account_ids is not None:
+            placeholders = ", ".join("?" for _ in account_ids)
+            scope = (
+                "SELECT DISTINCT connection_id FROM financial_accounts "
+                f"WHERE id IN ({placeholders}) AND connection_id IS NOT NULL"
+            )
+            parameters.extend(account_ids)
+        elif transaction_ids is not None:
+            placeholders = ", ".join("?" for _ in transaction_ids)
+            scope = (
+                "SELECT DISTINCT account.connection_id FROM financial_transactions AS financial_transaction "
+                "JOIN financial_accounts AS account ON account.id = financial_transaction.account_id "
+                f"WHERE financial_transaction.id IN ({placeholders}) "
+                "AND account.connection_id IS NOT NULL"
+            )
+            parameters.extend(transaction_ids)
+        else:
+            scope = "SELECT id AS connection_id FROM provider_connections"
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT connection.id, connection.provider, connection.status,
+                       connection.last_successful_at, account.source_updated_at
+                FROM provider_connections AS connection
+                JOIN ({scope}) AS scope ON scope.connection_id = connection.id
+                LEFT JOIN financial_accounts AS account ON account.connection_id = connection.id
+                ORDER BY connection.id ASC, account.id ASC
+                """,
+                tuple(parameters),
+            ).fetchall()
+
+        grouped: dict[int, dict[str, object]] = {}
+        for row in rows:
+            connection_id = int(row["id"])
+            current = grouped.setdefault(
+                connection_id,
+                {
+                    "provider": row["provider"],
+                    "status": row["status"],
+                    "last_successful_at": row["last_successful_at"],
+                    "source_updated_at": [],
+                },
+            )
+            current["source_updated_at"].append(row["source_updated_at"])
+        return [
+            ProviderConnectionFreshness(
+                connection_id=connection_id,
+                provider=values["provider"],
+                status=values["status"],
+                last_successful_at=values["last_successful_at"],
+                source_updated_at=tuple(values["source_updated_at"]),
+            )
+            for connection_id, values in grouped.items()
+        ]
 
     @staticmethod
     def _account_from_row(row: sqlite3.Row) -> AccountRecord:
