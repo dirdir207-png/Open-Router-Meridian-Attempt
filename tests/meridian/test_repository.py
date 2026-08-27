@@ -369,3 +369,30 @@ def test_transaction_pagination_and_account_filter_use_stable_order(repository):
         "old",
     ]
     assert filtered_cursor is None
+
+
+def test_transaction_pagination_emits_canonical_utc_cursor_for_offset_input(repository):
+    account = repository.upsert_account(
+        provider="crew",
+        external_id="cursor-account",
+        name="Cursor account",
+        account_type="checking",
+        balance=100.0,
+    )
+    for external_id in ("first", "second"):
+        repository.upsert_transaction(
+            provider="crew",
+            external_id=external_id,
+            account_id=account.id,
+            amount=-1.0,
+            occurred_at="2026-08-27T08:00:00+00:00",
+            description=external_id,
+            status="posted",
+        )
+
+    first_page, cursor = repository.list_transactions(limit=1)
+    second_page, _ = repository.list_transactions(limit=1, cursor=cursor)
+
+    assert first_page[0].occurred_at == "2026-08-27T08:00:00Z"
+    assert cursor is not None
+    assert [item.external_id for item in second_page] == ["first"]

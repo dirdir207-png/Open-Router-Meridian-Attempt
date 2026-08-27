@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -34,6 +35,11 @@ class ProviderFreshnessScope:
 
     connections: tuple[ProviderConnectionFreshness, ...]
     has_unlinked_records: bool
+
+
+_CANONICAL_OCCURRED_AT = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+)
 
 
 _ACCOUNT_COLUMNS = (
@@ -71,6 +77,21 @@ def _encode_cursor(occurred_at: str, record_id: int) -> str:
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
 
 
+def _canonical_occurred_at(value: str) -> str:
+    """Store occurrence times in the UTC spelling used by keyset cursors."""
+    if not isinstance(value, str):
+        raise ValueError("occurred_at must be a timezone-aware timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("occurred_at must be a timezone-aware timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("occurred_at must be a timezone-aware timestamp")
+    if _CANONICAL_OCCURRED_AT.fullmatch(value) is not None:
+        return value
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _decode_cursor(cursor: str) -> tuple[str, int]:
     try:
         encoded = cursor.encode("ascii")
@@ -82,6 +103,7 @@ def _decode_cursor(cursor: str) -> tuple[str, int]:
             not isinstance(occurred_at, str)
             or type(record_id) is not int
             or record_id < 1
+            or _CANONICAL_OCCURRED_AT.fullmatch(occurred_at) is None
         ):
             raise ValueError
         timestamp = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
@@ -205,6 +227,7 @@ class FinancialRepository:
         source_updated_at: Optional[str] = None,
         synced_at: Optional[str] = None,
     ) -> TransactionRecord:
+        occurred_at = _canonical_occurred_at(occurred_at)
         timestamp = synced_at or _now()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
