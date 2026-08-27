@@ -74,6 +74,9 @@ _EXECUTION_COLUMNS = {
     "execution_started_at": "TEXT",
 }
 
+# Added so repeated proposers (e.g. funding schedules) can be idempotent.
+_DEDUP_COLUMN = ("dedup_key", "TEXT")
+
 
 def _now() -> str:
     return datetime.now().isoformat()
@@ -87,9 +90,13 @@ class ActionStore:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(_SCHEMA)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(action_requests)")}
-            for column, column_type in _EXECUTION_COLUMNS.items():
+            for column, column_type in (*_EXECUTION_COLUMNS.items(), _DEDUP_COLUMN):
                 if column not in columns:
                     conn.execute(f"ALTER TABLE action_requests ADD COLUMN {column} {column_type}")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_action_requests_dedup_key "
+                "ON action_requests (dedup_key) WHERE dedup_key IS NOT NULL"
+            )
 
     def __repr__(self) -> str:
         return "ActionStore()"
@@ -97,14 +104,33 @@ class ActionStore:
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
 
-    def propose(self, action_type: str, params: Dict[str, Any], rationale: str, requested_by: str) -> Dict[str, Any]:
+    def propose(
+        self,
+        action_type: str,
+        params: Dict[str, Any],
+        rationale: str,
+        requested_by: str,
+        dedup_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         if action_type not in self._allowed_types:
             raise UnknownActionTypeError(f"Action type is not permitted: {action_type}")
+        if dedup_key is not None:
+            existing = self.get_by_dedup_key(dedup_key)
+            if existing is not None:
+                return existing
         request_id = uuid.uuid4().hex
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if dedup_key is not None:
+                existing_row = conn.execute(
+                    "SELECT id FROM action_requests WHERE dedup_key = ?",
+                    (dedup_key,),
+                ).fetchone()
+                if existing_row is not None:
+                    return self.get(existing_row[0])
             conn.execute(
-                "INSERT INTO action_requests (id, type, params_json, rationale, requested_by, state, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO action_requests (id, type, params_json, rationale, requested_by, state, created_at, dedup_key) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     request_id,
                     action_type,
@@ -113,9 +139,18 @@ class ActionStore:
                     requested_by,
                     ActionState.PROPOSED.value,
                     _now(),
+                    dedup_key,
                 ),
             )
         return self.get(request_id)
+
+    def get_by_dedup_key(self, dedup_key: str) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT {_SELECT_COLUMNS} FROM action_requests WHERE dedup_key = ?",
+                (dedup_key,),
+            ).fetchone()
+        return self._row_to_dict(row) if row else None
 
     def get(self, request_id: str) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:

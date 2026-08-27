@@ -815,13 +815,21 @@ def verify_transfer_action(params, result):
     confirmed = isinstance(transfer_id, str) and bool(transfer_id.strip())
     return {"ok": confirmed, "check": "confirmed-transfer-id"}
 
-action_store = ActionStore(db_path=DB_FILE, allowed_types=("move_money",))
+action_store = ActionStore(
+    db_path=DB_FILE, allowed_types=("move_money", "scheduled_move_money")
+)
 local_proposer_key = get_or_create_local_key(DB_FILE)
 action_executors = {
     "move_money": ExecutorSpec(
         execute=lambda p: move_money(p["from_id"], p["to_id"], p["amount"], p.get("memo", "")),
         verifier=verify_transfer_action,
-    )
+    ),
+    # Scheduled funding rides the exact same vetted move_money path;
+    # proposals still require explicit owner approval before execution.
+    "scheduled_move_money": ExecutorSpec(
+        execute=lambda p: move_money(p["from_id"], p["to_id"], p["amount"], p.get("memo", "")),
+        verifier=verify_transfer_action,
+    ),
 }
 
 def resolve_crew_target(name):
