@@ -1,9 +1,77 @@
+import shutil
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from pathlib import Path
+from threading import Event
 
 import pytest
 
 from meridian import db as db_module
 from meridian.db import run_migrations
+from meridian.repository import FinancialRepository
+
+
+def _create_pre_timestamp_migration_database(
+    db_path: Path, migrations_dir: Path, monkeypatch
+) -> None:
+    legacy_migrations = migrations_dir / "legacy-migrations"
+    legacy_migrations.mkdir()
+    for source in sorted(db_module.MIGRATIONS_DIR.glob("00[1-3]_*.sql")):
+        shutil.copy(source, legacy_migrations / source.name)
+    with monkeypatch.context() as migration_patch:
+        migration_patch.setattr(db_module, "MIGRATIONS_DIR", legacy_migrations)
+        run_migrations(str(db_path))
+
+
+def _seed_legacy_transaction(
+    db_path: Path,
+    *,
+    occurred_at: str,
+    source_updated_at: str = "2026-08-27T08:00:00Z#legacy",
+) -> int:
+    with sqlite3.connect(db_path) as connection:
+        account_id = connection.execute(
+            """
+            INSERT INTO financial_accounts (
+                provider, external_id, name, account_type, balance, currency,
+                synced_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "crew",
+                "legacy-account",
+                "Legacy account",
+                "checking",
+                100.0,
+                "USD",
+                "2026-08-27T08:00:00Z",
+                "2026-08-27T08:00:00Z",
+                "2026-08-27T08:00:00Z",
+            ),
+        ).lastrowid
+        return connection.execute(
+            """
+            INSERT INTO financial_transactions (
+                account_id, provider, external_id, amount, currency,
+                occurred_at, description, status, source_updated_at, synced_at,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                account_id,
+                "crew",
+                "legacy-transaction",
+                -1.0,
+                "USD",
+                occurred_at,
+                "Legacy",
+                "posted",
+                source_updated_at,
+                "2026-08-27T08:00:00Z",
+                "2026-08-27T08:00:00Z",
+                "2026-08-27T08:00:00Z",
+            ),
+        ).lastrowid
 
 
 def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
@@ -19,6 +87,7 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
         "001_financial_graph.sql",
         "002_financial_integrity.sql",
         "003_provider_sync_runs.sql",
+        "004_canonical_transaction_timestamps.sql",
     ]
     assert run_migrations(str(db_path)) == []
 
@@ -26,9 +95,7 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
         migrations = connection.execute(
             "SELECT version, name FROM schema_migrations ORDER BY version"
         ).fetchall()
-        legacy_row = connection.execute(
-            "SELECT date, balance FROM history"
-        ).fetchone()
+        legacy_row = connection.execute("SELECT date, balance FROM history").fetchone()
         tables = {
             row[0]
             for row in connection.execute(
@@ -40,6 +107,7 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
         ("001", "001_financial_graph.sql"),
         ("002", "002_financial_integrity.sql"),
         ("003", "003_provider_sync_runs.sql"),
+        ("004", "004_canonical_transaction_timestamps.sql"),
     ]
     assert legacy_row == ("2026-08-26", 1234.56)
     assert {
@@ -59,7 +127,8 @@ def test_financial_graph_schema_tracks_relation_freshness_and_provider_ownership
 
     with sqlite3.connect(db_path) as connection:
         relation_columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(transaction_relations)")
+            row[1]
+            for row in connection.execute("PRAGMA table_info(transaction_relations)")
         }
         connection.execute(
             """
@@ -219,3 +288,167 @@ def test_retroactive_migration_insertion_is_rejected(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="append-only"):
         run_migrations(str(db_path))
+
+
+def test_timestamp_migration_is_recorded_once_and_preserves_provenance(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "timestamp-upgrade.db"
+    _create_pre_timestamp_migration_database(db_path, tmp_path, monkeypatch)
+    transaction_id = _seed_legacy_transaction(
+        db_path,
+        occurred_at="2026-08-27T04:00:00.11-04:00",
+    )
+
+    assert run_migrations(str(db_path)) == ["004_canonical_transaction_timestamps.sql"]
+    assert run_migrations(str(db_path)) == []
+
+    with sqlite3.connect(db_path) as connection:
+        migration = connection.execute(
+            "SELECT version, name FROM schema_migrations WHERE version = '004'"
+        ).fetchone()
+        transaction = connection.execute(
+            """
+            SELECT occurred_at, occurred_at_valid, source_updated_at
+            FROM financial_transactions WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+
+    assert migration == ("004", "004_canonical_transaction_timestamps.sql")
+    assert transaction == (
+        "2026-08-27T08:00:00.110000Z",
+        1,
+        "2026-08-27T08:00:00Z#legacy",
+    )
+
+
+def test_timestamp_migration_failure_rolls_back_and_resumes(tmp_path, monkeypatch):
+    db_path = tmp_path / "timestamp-resume.db"
+    _create_pre_timestamp_migration_database(db_path, tmp_path, monkeypatch)
+    transaction_id = _seed_legacy_transaction(
+        db_path,
+        occurred_at="2026-08-27T04:00:00.1-04:00",
+    )
+    migration_name = "004_canonical_transaction_timestamps.sql"
+    real_hook = db_module._MIGRATION_HOOKS[migration_name]
+
+    def fail_after_conversion(connection):
+        real_hook(connection)
+        raise RuntimeError("interrupted timestamp migration")
+
+    monkeypatch.setitem(
+        db_module._MIGRATION_HOOKS, migration_name, fail_after_conversion
+    )
+    with pytest.raises(RuntimeError, match="interrupted"):
+        run_migrations(str(db_path))
+
+    with sqlite3.connect(db_path) as connection:
+        migration = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = '004'"
+        ).fetchone()
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(financial_transactions)")
+        }
+        occurred_at = connection.execute(
+            "SELECT occurred_at FROM financial_transactions WHERE id = ?",
+            (transaction_id,),
+        ).fetchone()[0]
+
+    assert migration is None
+    assert "occurred_at_valid" not in columns
+    assert occurred_at == "2026-08-27T04:00:00.1-04:00"
+
+    monkeypatch.setitem(db_module._MIGRATION_HOOKS, migration_name, real_hook)
+    assert run_migrations(str(db_path)) == [migration_name]
+
+
+def test_timestamp_migration_locks_before_read_and_does_not_lose_concurrent_write(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "timestamp-concurrency.db"
+    _create_pre_timestamp_migration_database(db_path, tmp_path, monkeypatch)
+    _seed_legacy_transaction(
+        db_path,
+        occurred_at="2026-08-27T08:00:00Z",
+        source_updated_at="2026-08-27T08:00:00Z",
+    )
+    repository = object.__new__(FinancialRepository)
+    repository._db_path = str(db_path)
+    migration_name = "004_canonical_transaction_timestamps.sql"
+    real_hook = db_module._MIGRATION_HOOKS[migration_name]
+    migration_read = Event()
+    allow_migration = Event()
+    writer_started = Event()
+
+    def pause_after_read(connection):
+        assert (
+            connection.execute(
+                "SELECT occurred_at FROM financial_transactions"
+            ).fetchone()[0]
+            == "2026-08-27T08:00:00Z"
+        )
+        migration_read.set()
+        assert allow_migration.wait(timeout=5)
+        real_hook(connection)
+
+    monkeypatch.setitem(db_module._MIGRATION_HOOKS, migration_name, pause_after_read)
+
+    def write_newer_value():
+        writer_started.set()
+        account_id = repository.list_accounts()[0].id
+        return repository.upsert_transaction(
+            provider="crew",
+            external_id="legacy-transaction",
+            account_id=account_id,
+            amount=-2.0,
+            occurred_at="2026-08-27T09:00:00Z",
+            description="Newer",
+            status="posted",
+            source_updated_at="2026-08-27T09:00:00Z",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        migrating = executor.submit(run_migrations, str(db_path))
+        assert migration_read.wait(timeout=5)
+        writing = executor.submit(write_newer_value)
+        assert writer_started.wait(timeout=5)
+        with pytest.raises(TimeoutError):
+            writing.result(timeout=0.1)
+        allow_migration.set()
+        assert migrating.result(timeout=5) == [migration_name]
+        written = writing.result(timeout=5)
+
+    assert written.occurred_at == "2026-08-27T09:00:00.000000Z"
+    assert written.description == "Newer"
+
+
+def test_invalid_legacy_timestamp_is_quarantined_without_blocking_reads(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "invalid-timestamp.db"
+    _create_pre_timestamp_migration_database(db_path, tmp_path, monkeypatch)
+    transaction_id = _seed_legacy_transaction(
+        db_path,
+        occurred_at="legacy-not-a-time",
+    )
+
+    repository = FinancialRepository(str(db_path))
+
+    assert repository.list_transactions() == ([], None)
+    assert repository.get_transaction(transaction_id) is None
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT occurred_at, occurred_at_valid, source_updated_at
+            FROM financial_transactions WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        migration = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = '004'"
+        ).fetchone()
+
+    assert row == ("legacy-not-a-time", 0, "2026-08-27T08:00:00Z#legacy")
+    assert migration == (1,)

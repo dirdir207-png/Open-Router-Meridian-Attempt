@@ -66,3 +66,6 @@ Thumbs.db
 
 # Deployment config is machine-local (untracked by design)
 docker-compose.yml
+
+tmp/
+.venv/

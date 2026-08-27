@@ -1,10 +1,13 @@
 import json
+import shutil
 import sqlite3
 from dataclasses import FrozenInstanceError
 
 import pytest
 
-from meridian.repository import FinancialRepository
+from meridian import db as db_module
+from meridian.db import run_migrations
+from meridian.repository import FinancialRepository, _encode_cursor
 
 
 @pytest.fixture
@@ -436,54 +439,105 @@ def test_transaction_ordering_uses_fixed_width_fractional_utc_storage(repository
     ]
 
 
-def test_repository_backfills_legacy_offset_timestamp_before_emitting_cursor(tmp_path):
-    db_path = tmp_path / "legacy-cursor.db"
-    repository = FinancialRepository(str(db_path))
+def test_transaction_write_rejects_more_than_microsecond_precision(repository):
     account = repository.upsert_account(
         provider="crew",
-        external_id="legacy-account",
-        name="Legacy account",
+        external_id="precision-account",
+        name="Precision account",
         account_type="checking",
         balance=100.0,
     )
-    repository.upsert_transaction(
-        provider="crew",
-        external_id="newer-transaction",
-        account_id=account.id,
-        amount=-1.0,
-        occurred_at="2026-08-27T09:00:00Z",
-        description="Newer",
-        status="posted",
-    )
-    with sqlite3.connect(db_path) as connection:
-        connection.execute(
-            """
-            INSERT INTO financial_transactions (
-                account_id, provider, external_id, amount, currency,
-                occurred_at, description, status, source_updated_at, synced_at,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                account.id,
-                "crew",
-                "legacy-offset-transaction",
-                -2.0,
-                "USD",
-                "2026-08-27T08:00:00.11+00:00",
-                "Legacy",
-                "posted",
-                "2026-08-27T08:00:00Z#11",
-                "2026-08-27T09:00:00Z",
-                "2026-08-27T09:00:00Z",
-                "2026-08-27T09:00:00Z",
-            ),
+
+    with pytest.raises(ValueError, match="at most 6 fractional digits"):
+        repository.upsert_transaction(
+            provider="crew",
+            external_id="too-precise",
+            account_id=account.id,
+            amount=-1.0,
+            occurred_at="2026-08-27T08:00:00.1234567Z",
+            description="Too precise",
+            status="posted",
         )
 
-    upgraded = FinancialRepository(str(db_path))
-    first_page, cursor = upgraded.list_transactions(limit=1)
-    second_page, _ = upgraded.list_transactions(limit=1, cursor=cursor)
+    assert repository.list_transactions() == ([], None)
 
-    assert first_page[0].occurred_at == "2026-08-27T09:00:00.000000Z"
-    assert second_page[0].occurred_at == "2026-08-27T08:00:00.110000Z"
-    assert second_page[0].source_updated_at == "2026-08-27T08:00:00Z#11"
+
+@pytest.mark.parametrize(
+    "legacy_timestamp",
+    [
+        "2026-08-27T09:00:00Z",
+        "2026-08-27T09:00:00.1Z",
+        "2026-08-27T09:00:00.123456Z",
+    ],
+)
+def test_pre_upgrade_cursor_continues_after_fixed_width_migration(
+    tmp_path, monkeypatch, legacy_timestamp
+):
+    db_path = tmp_path / "pre-upgrade-cursor.db"
+    original_migrations_dir = db_module.MIGRATIONS_DIR
+    legacy_migrations = tmp_path / "legacy-migrations"
+    legacy_migrations.mkdir()
+    for source in sorted(original_migrations_dir.glob("00[1-3]_*.sql")):
+        shutil.copy(source, legacy_migrations / source.name)
+    with monkeypatch.context() as migration_patch:
+        migration_patch.setattr(db_module, "MIGRATIONS_DIR", legacy_migrations)
+        run_migrations(str(db_path))
+
+    with sqlite3.connect(db_path) as connection:
+        account_id = connection.execute(
+            """
+            INSERT INTO financial_accounts (
+                provider, external_id, name, account_type, balance, currency,
+                synced_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "crew",
+                "legacy-cursor-account",
+                "Legacy cursor account",
+                "checking",
+                100.0,
+                "USD",
+                "2026-08-27T10:00:00Z",
+                "2026-08-27T10:00:00Z",
+                "2026-08-27T10:00:00Z",
+            ),
+        ).lastrowid
+        for external_id, occurred_at in (
+            ("newer", "2026-08-27T10:00:00Z"),
+            ("cursor-row", legacy_timestamp),
+            ("older", "2026-08-27T08:00:00Z"),
+        ):
+            cursor = connection.execute(
+                """
+                INSERT INTO financial_transactions (
+                    account_id, provider, external_id, amount, currency,
+                    occurred_at, description, status, synced_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    account_id,
+                    "crew",
+                    external_id,
+                    -1.0,
+                    "USD",
+                    occurred_at,
+                    external_id,
+                    "posted",
+                    "2026-08-27T10:00:00Z",
+                    "2026-08-27T10:00:00Z",
+                    "2026-08-27T10:00:00Z",
+                ),
+            )
+            if external_id == "cursor-row":
+                cursor_row_id = cursor.lastrowid
+
+    pre_upgrade_cursor = _encode_cursor(legacy_timestamp, cursor_row_id)
+    repository = FinancialRepository(str(db_path))
+
+    records, next_cursor = repository.list_transactions(
+        limit=10, cursor=pre_upgrade_cursor
+    )
+
+    assert [record.external_id for record in records] == ["older"]
+    assert next_cursor is None

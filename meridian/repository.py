@@ -10,6 +10,7 @@ from typing import Optional, Sequence
 
 from .db import run_migrations
 from .models import AccountRecord, TransactionRecord
+from .timestamps import canonical_occurred_at
 
 
 @dataclass(frozen=True)
@@ -37,8 +38,8 @@ class ProviderFreshnessScope:
     has_unlinked_records: bool
 
 
-_CANONICAL_OCCURRED_AT = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$"
+_COMPATIBLE_CURSOR_OCCURRED_AT = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
 )
 
 
@@ -77,19 +78,6 @@ def _encode_cursor(occurred_at: str, record_id: int) -> str:
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
 
 
-def _canonical_occurred_at(value: str) -> str:
-    """Store occurrence times in the UTC spelling used by keyset cursors."""
-    if not isinstance(value, str):
-        raise ValueError("occurred_at must be a timezone-aware timestamp")
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("occurred_at must be a timezone-aware timestamp") from exc
-    if parsed.tzinfo is None:
-        raise ValueError("occurred_at must be a timezone-aware timestamp")
-    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-
 def _decode_cursor(cursor: str) -> tuple[str, int]:
     try:
         encoded = cursor.encode("ascii")
@@ -101,12 +89,10 @@ def _decode_cursor(cursor: str) -> tuple[str, int]:
             not isinstance(occurred_at, str)
             or type(record_id) is not int
             or record_id < 1
-            or _CANONICAL_OCCURRED_AT.fullmatch(occurred_at) is None
+            or _COMPATIBLE_CURSOR_OCCURRED_AT.fullmatch(occurred_at) is None
         ):
             raise ValueError
-        timestamp = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-        if timestamp.tzinfo is None:
-            raise ValueError
+        canonical_occurred_at_value = canonical_occurred_at(occurred_at)
         canonical_payload = json.dumps(
             [occurred_at, record_id], separators=(",", ":")
         ).encode("utf-8")
@@ -114,32 +100,13 @@ def _decode_cursor(cursor: str) -> tuple[str, int]:
             raise ValueError
     except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError("Invalid transaction cursor") from exc
-    return occurred_at, record_id
+    return canonical_occurred_at_value, record_id
 
 
 class FinancialRepository:
     def __init__(self, db_path: str):
         self._db_path = db_path
         run_migrations(db_path)
-        self._backfill_occurred_at()
-
-    def _backfill_occurred_at(self) -> None:
-        """Canonicalize rows written before fixed-width cursor keys existed."""
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT id, occurred_at FROM financial_transactions"
-            ).fetchall()
-            updates = []
-            for row in rows:
-                canonical = _canonical_occurred_at(row["occurred_at"])
-                if canonical != row["occurred_at"]:
-                    updates.append((canonical, row["id"]))
-            if updates:
-                connection.execute("BEGIN IMMEDIATE")
-                connection.executemany(
-                    "UPDATE financial_transactions SET occurred_at = ? WHERE id = ?",
-                    updates,
-                )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._db_path, timeout=30)
@@ -244,7 +211,7 @@ class FinancialRepository:
         source_updated_at: Optional[str] = None,
         synced_at: Optional[str] = None,
     ) -> TransactionRecord:
-        occurred_at = _canonical_occurred_at(occurred_at)
+        occurred_at = canonical_occurred_at(occurred_at)
         timestamp = synced_at or _now()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -271,6 +238,8 @@ class FinancialRepository:
                         THEN excluded.currency ELSE financial_transactions.currency END,
                     occurred_at = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
                         THEN excluded.occurred_at ELSE financial_transactions.occurred_at END,
+                    occurred_at_valid = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
+                        THEN 1 ELSE financial_transactions.occurred_at_valid END,
                     posted_at = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
                         THEN excluded.posted_at ELSE financial_transactions.posted_at END,
                     description = CASE WHEN {_TRANSACTION_FRESHNESS_CONDITION}
@@ -426,7 +395,7 @@ class FinancialRepository:
         if limit < 1 or limit > 200:
             raise ValueError("limit must be between 1 and 200")
 
-        conditions: list[str] = []
+        conditions: list[str] = ["occurred_at_valid = 1"]
         parameters: list[object] = []
         if account_id is not None:
             conditions.append("account_id = ?")
@@ -458,7 +427,8 @@ class FinancialRepository:
         """Return one normalized transaction by its local, opaque Meridian id."""
         with self._connect() as connection:
             row = connection.execute(
-                f"SELECT {_TRANSACTION_COLUMNS} FROM financial_transactions WHERE id = ?",
+                f"SELECT {_TRANSACTION_COLUMNS} FROM financial_transactions "
+                "WHERE id = ? AND occurred_at_valid = 1",
                 (transaction_id,),
             ).fetchone()
         return self._transaction_from_row(row) if row is not None else None

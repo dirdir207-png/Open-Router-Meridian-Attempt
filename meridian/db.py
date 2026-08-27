@@ -4,7 +4,9 @@ import hashlib
 import re
 import sqlite3
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
+
+from .timestamps import canonical_occurred_at
 
 MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 _MIGRATION_NAME = re.compile(r"^(?P<version>\d{3})_[a-z0-9_]+\.sql$")
@@ -16,6 +18,39 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
+
+
+def _canonicalize_transaction_timestamps(connection: sqlite3.Connection) -> None:
+    """Convert valid legacy keys and quarantine invalid keys in place."""
+    rows = connection.execute(
+        "SELECT id, occurred_at FROM financial_transactions ORDER BY id"
+    ).fetchall()
+    for transaction_id, occurred_at in rows:
+        try:
+            canonical = canonical_occurred_at(occurred_at)
+        except ValueError:
+            connection.execute(
+                """
+                UPDATE financial_transactions
+                SET occurred_at_valid = 0
+                WHERE id = ?
+                """,
+                (transaction_id,),
+            )
+            continue
+        connection.execute(
+            """
+            UPDATE financial_transactions
+            SET occurred_at = ?, occurred_at_valid = 1
+            WHERE id = ?
+            """,
+            (canonical, transaction_id),
+        )
+
+
+_MIGRATION_HOOKS: dict[str, Callable[[sqlite3.Connection], None]] = {
+    "004_canonical_transaction_timestamps.sql": _canonicalize_transaction_timestamps,
+}
 
 
 def _migration_files() -> list[tuple[str, Path]]:
@@ -133,6 +168,9 @@ def run_migrations(db_path: str) -> list[str]:
 
                 for statement in _statements(script):
                     connection.execute(statement)
+                hook = _MIGRATION_HOOKS.get(path.name)
+                if hook is not None:
+                    hook(connection)
                 connection.execute(
                     "INSERT INTO schema_migrations (version, name, checksum) "
                     "VALUES (?, ?, ?)",
