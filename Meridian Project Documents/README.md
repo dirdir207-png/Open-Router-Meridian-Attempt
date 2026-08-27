@@ -16,6 +16,7 @@ The first five documents are supplied in both editable Markdown and presentation
 
 6. **Task 1 Engineering Report** - production configuration, CI, audit, Docker, browser-smoke, and review evidence.
 7. **Task 2 Engineering Report** - atomic and idempotent execution implementation and concurrency-test evidence.
+8. **Task 3 Engineering Report** - versioned migration, normalized read-model, freshness, provenance, pagination, and recovery evidence.
 
 ## Current branch
 

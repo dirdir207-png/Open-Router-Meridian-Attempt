@@ -125,3 +125,181 @@ s...................................................s................... [ 58%]
 
 - If a process stops after claiming but before recording the external outcome, the action intentionally remains `executing`. It cannot be executed again automatically; an operator must verify external state before any reconciliation. This favors duplicate-transfer prevention over automatic recovery.
 - The execution key currently provides local idempotency and auditability. The existing Crew executor contract accepts only action parameters and exposes no provider idempotency-key field, so this task does not claim provider-side idempotency.
+
+---
+
+## Fix Round 1 — Atomic Transitions, Uncertain Exceptions, Concurrent Migration
+
+### Findings Addressed
+
+1. Generic action transitions now use a conditional `UPDATE` constrained by both request ID and the state observed during transition validation. A zero-row update raises `IllegalTransitionError("Action state changed before transition completed")`, so a stale expiry cannot overwrite an execution claim or terminal result.
+2. Exceptions raised by the external executor now persist `verify_state=True` alongside `error_code="executor_exception"`. The executor is called once, no automatic retry occurs, and the verifier is not called because the provider outcome is uncertain.
+3. `ActionStore` initialization now acquires a SQLite schema write lock with `BEGIN IMMEDIATE` before creating/inspecting/migrating `action_requests`. Concurrent initializers therefore serialize their column checks and cannot both attempt the same `ALTER TABLE`.
+
+### Files Changed in Fix Round
+
+- `crew/actions.py`
+- `crew/executors.py`
+- `tests/crew/test_actions.py`
+- `tests/crew/test_executors.py`
+
+The untracked `tmp/`, `Meridian Project Documents.zip`, and consolidated documentation were not touched.
+
+### Named Regression Coverage
+
+- `test_stale_expiry_cannot_overwrite_execution_claim`
+  - Uses two `ActionStore` instances and distinct SQLite connections.
+  - Deterministically pauses expiry after its `approved` read, commits the execution claim, resumes expiry, and requires the stale transition to conflict.
+  - Confirms the protected action remains `executing` and can continue to `executed` and `verified`.
+- `test_executor_exception_persists_uncertain_outcome_without_retry_or_verification`
+  - Confirms one executor call, zero verifier calls, persisted `FAILED` state, `error_code="executor_exception"`, and `verify_state=True`.
+- `test_concurrent_store_initialization_migrates_legacy_schema_once`
+  - Starts two initializers together against one legacy database and forces the old implementation's duplicate-`ALTER TABLE` window.
+  - Confirms both initializers succeed, both execution columns exist, and the legacy row is preserved.
+
+### RED Evidence
+
+```text
+$ pytest tests/crew/test_actions.py -k stale_expiry -q
+F                                                                        [100%]
+E           Failed: DID NOT RAISE <class 'crew.actions.IllegalTransitionError'>
+1 failed, 9 deselected in 0.19s
+
+$ pytest tests/crew/test_executors.py -k executor_exception -q
+F                                                                        [100%]
+E       KeyError: 'verify_state'
+1 failed, 7 deselected in 0.13s
+
+$ pytest tests/crew/test_actions.py -k concurrent_store_initialization -q
+F                                                                        [100%]
+E       sqlite3.OperationalError: duplicate column name: execution_key
+1 failed, 9 deselected in 0.67s
+```
+
+Each failure matched the reviewed defect: stale transition overwrite, missing uncertainty signal, and duplicate-column startup race.
+
+### GREEN Evidence
+
+```text
+$ pytest tests/crew/test_actions.py -k 'stale_expiry or concurrent_store_initialization' -q
+..                                                                       [100%]
+2 passed, 8 deselected in 0.70s
+
+$ pytest tests/crew/test_executors.py -k executor_exception -q
+.                                                                        [100%]
+1 passed, 7 deselected in 0.09s
+```
+
+### Fix-Round Verification
+
+```text
+$ git diff --check
+(no output; exit 0)
+
+$ ruff check crew/actions.py crew/executors.py tests/crew/test_actions.py tests/crew/test_executors.py tests/test_app_crew_integration.py
+All checks passed!
+
+$ pytest tests/crew/test_actions.py tests/crew/test_executors.py tests/test_app_crew_integration.py -q
+.......................................                                  [100%]
+39 passed in 2.44s
+
+$ pytest -q
+s.....................................................s................. [ 57%]
+......................................................                   [100%]
+124 passed, 2 skipped in 3.49s
+```
+
+### Fix-Round Self-Review
+
+- Confirmed every generic transition's write compares against the exact state previously validated; stale approval, rejection, expiry, execution, verification, and failure writes cannot overwrite a competing transition.
+- Confirmed transition row-count validation occurs in the same transaction as the conditional update and the returned row is read before commit.
+- Confirmed schema inspection and all execution-column additions occur under one `BEGIN IMMEDIATE` transaction.
+- Confirmed migration remains non-destructive and sequentially idempotent while becoming safe for concurrent initialization.
+- Confirmed executor exceptions remain non-retryable and do not claim provider success; the persisted payload explicitly directs state verification.
+- Confirmed the execution key remains accurately described as local audit/idempotency metadata only; no provider-side idempotency claim was added.
+
+### Remaining Concern
+
+- The previously documented recovery posture is unchanged: a process interruption after claim leaves the action `executing` until external state is manually verified. This is deliberate duplicate-transfer protection, not an automatically retryable state.
+
+---
+
+## Fix Round 2 — Expiry Sweep Claim Conflict
+
+### Finding Addressed
+
+`expire_stale_approvals` now handles `IllegalTransitionError` around each individual `store.expire` call. When an approved snapshot is claimed before expiry, the sweep skips that now-ineligible request and continues processing later stale approvals. The pending endpoint therefore does not return 500 for this expected concurrency race.
+
+### Files Changed in Fix Round
+
+- `crew/executors.py`
+- `tests/crew/test_executors.py`
+- `tests/test_app_crew_integration.py`
+
+The untracked `tmp/`, `Meridian Project Documents.zip`, and documentation were not touched.
+
+### Named Regression Coverage
+
+- `test_expiry_sweep_tolerates_claim_race_and_continues`
+  - Selects two stale approved candidates, deterministically claims the first after selection, and confirms the sweep skips that conflict.
+  - Confirms the claimed request stays `executing`, the second candidate becomes `expired`, and only the successfully expired ID is returned.
+- `test_pending_endpoint_tolerates_claim_during_expiry_sweep`
+  - Reproduces the same deterministic race through authenticated `GET /api/actions/pending`.
+  - Confirms HTTP 200, no pending proposals, the claimed action remains `executing`, and the other stale action is expired.
+
+### RED Evidence
+
+```text
+$ pytest tests/crew/test_executors.py -k expiry_sweep_tolerates -q
+F                                                                        [100%]
+E   crew.actions.IllegalTransitionError: Cannot move action from executing to expired
+1 failed, 8 deselected in 0.16s
+
+$ pytest tests/test_app_crew_integration.py -k pending_endpoint_tolerates -q
+F                                                                        [100%]
+E       assert 500 == 200
+1 failed, 21 deselected in 1.20s
+```
+
+### GREEN Evidence
+
+```text
+$ pytest tests/crew/test_executors.py -k expiry_sweep_tolerates -q
+.                                                                        [100%]
+1 passed, 8 deselected in 0.12s
+
+$ pytest tests/test_app_crew_integration.py -k pending_endpoint_tolerates -q
+.                                                                        [100%]
+1 passed, 21 deselected in 1.12s
+```
+
+### Fix-Round Verification
+
+```text
+$ git diff --check
+(no output; exit 0)
+
+$ ruff check crew/executors.py tests/crew/test_executors.py tests/test_app_crew_integration.py
+All checks passed!
+
+$ pytest tests/crew/test_actions.py tests/crew/test_executors.py tests/test_app_crew_integration.py -q
+.........................................                                [100%]
+41 passed in 2.43s
+
+$ pytest -q
+s.....................................................s................. [ 56%]
+........................................................                 [100%]
+126 passed, 2 skipped in 3.64s
+```
+
+### Fix-Round Self-Review
+
+- Confirmed conflict handling is scoped to each expiry candidate, so one race cannot abort the sweep.
+- Confirmed IDs are appended only after successful expiry; skipped claims are not falsely reported as expired.
+- Confirmed no retry occurs and an `executing` action remains unchanged.
+- Confirmed the HTTP route requires no special error handling because the sweep absorbs this expected transition race at its ownership boundary.
+- Confirmed the execution key remains local audit/idempotency metadata only; no provider-side idempotency claim was added.
+
+### Remaining Concern
+
+- None introduced by this fix. The intentional manual-verification posture for interrupted `executing` actions remains unchanged.

@@ -94,10 +94,12 @@ Because AI assisted development, preserve evidence of human direction, selection
 - Product design, implementation plan, model strategy, and evidence-graph expansion are committed.
 - An isolated implementation worktree exists at `.worktrees/meridian`.
 - Baseline Docker build succeeded and the original suite passed 116 tests.
-- Task 1 initially produced commit `c385855`, with 118 tests passing and an isolated production browser smoke test passing.
-- Independent review rejected Task 1 pending a genuinely passing dependency audit, full lint gate, bounded smoke-test startup, promotion of the tested image, and stronger configuration tests.
-- A subsequent correction attempt hit the account usage limit and left an uncommitted mechanical lint cleanup. Those changes are not accepted as complete and require verification before they are committed.
-- No merge, push, deployment, or production financial mutation has been performed.
+- Task 1 is complete and independently approved. Production uses Gunicorn; dependency audit, configured lint, Docker artifact identity, CI, and browser smoke gates pass.
+- Task 2 is complete after two review rounds. Financial actions are atomically claimed before external execution; expiry races cannot overwrite claims; uncertain outcomes require manual verification and are never automatically retried.
+- Task 3 is complete after one review round. Meridian has transactional, append-only, resumable migrations plus immutable provider-neutral account and transaction read models with freshness precedence, provenance integrity, stable cursor pagination, and concurrent-startup coverage.
+- The verified suite currently reports 139 passed and 2 skipped tests, with configured Ruff clean.
+- Reviewed work through Task 3 is pushed to GitHub on `feat/meridian-implementation` after the archival checkpoint is published.
+- No merge, deployment, or production financial mutation has been performed.
 
 ## Binding safety rules
 
