@@ -139,6 +139,37 @@ def test_financial_refresh_syncs_meridian_without_changing_legacy_response(monke
     assert sync_calls == [True]
 
 
+def test_financial_refresh_keeps_legacy_response_when_meridian_sync_fails(monkeypatch):
+    class StubResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "data": {
+                    "currentUser": {
+                        "accounts": [
+                            {
+                                "subaccounts": [
+                                    {"id": "checking-1", "name": "Checking", "overallBalance": 12345}
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(simplecrew.requests, "post", lambda *args, **kwargs: StubResponse())
+    monkeypatch.setattr(simplecrew, "sync_provider", lambda *args: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    result = simplecrew.get_financial_data.__wrapped__()
+
+    assert result == {
+        "checking": {"name": "Checking", "balance": "$123.45", "raw_balance": 123.45},
+        "total_goals": 0.0,
+    }
+
+
 def test_move_money_rejects_truthy_result_without_confirmed_string_id(monkeypatch):
     """Review blocker regression: a truthy result with a missing/empty/non-string
     transfer id must not be reported as confirmed success."""

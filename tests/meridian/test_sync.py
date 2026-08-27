@@ -221,3 +221,59 @@ def test_two_page_adapter_failure_retains_first_page_and_reports_partial(reposit
     assert report.errors == 1
     assert [transaction.external_id for transaction in transactions] == ["first-page-transaction"]
     assert client.calls[-1][1]["cursor"] == "next-page"
+
+
+def test_crew_status_revisions_with_same_occurrence_update_but_stale_arrivals_do_not(repository):
+    class RevisionCrewClient:
+        status = "pending"
+
+        def execute(self, operation_name, query, variables=None, *, is_mutation=False):
+            if operation_name == "CurrentUser":
+                return {
+                    "currentUser": {
+                        "accounts": [
+                            {
+                                "id": "account-main",
+                                "displayName": "Household",
+                                "subaccounts": [
+                                    {
+                                        "id": "checking",
+                                        "displayName": "Checking",
+                                        "overallBalance": 5000,
+                                        "isPrimary": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            return {
+                "account": {
+                    "cashTransactions": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "id": "same-occurrence",
+                                    "amount": -100,
+                                    "description": "Lunch",
+                                    "occurredAt": "2026-08-26T09:00:00Z",
+                                    "status": self.status,
+                                    "subaccount": {"id": "checking"},
+                                }
+                            }
+                        ],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    }
+                }
+            }
+
+    client = RevisionCrewClient()
+    sync_provider(SnapshotAdapter(CrewReadAdapter(client).fetch_snapshot()), repository)
+    client.status = "posted"
+    sync_provider(SnapshotAdapter(CrewReadAdapter(client).fetch_snapshot()), repository)
+    client.status = "pending"
+    sync_provider(SnapshotAdapter(CrewReadAdapter(client).fetch_snapshot()), repository)
+
+    transactions, _ = repository.list_transactions()
+    assert transactions[0].status == "posted"
+    assert transactions[0].source_updated_at.endswith("#30")

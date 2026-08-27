@@ -58,6 +58,11 @@ query RecentActivity($accountId: ID!, $cursor: String, $pageSize: Int = 100) {
 }
 """
 
+_TRANSACTION_STATUS_REVISIONS = {
+    "pending": 10,
+    "posted": 30,
+}
+
 
 class CrewReadAdapter:
     """Translate Crew reads without exposing source payloads or credentials."""
@@ -72,7 +77,17 @@ class CrewReadAdapter:
 
     def fetch_snapshot(self) -> ProviderSnapshot:
         user_data = self._client.execute("CurrentUser", _CURRENT_USER_QUERY)
-        accounts_data = (user_data.get("currentUser") or {}).get("accounts") or []
+        current_user = user_data.get("currentUser") if isinstance(user_data, dict) else None
+        accounts_data = current_user.get("accounts") if isinstance(current_user, dict) else None
+        if not isinstance(accounts_data, list):
+            return ProviderSnapshot(
+                connection_external_id=self.connection_external_id,
+                connection_name=self.connection_name,
+                accounts=(),
+                transactions=(),
+                is_complete=False,
+                errors=("current user malformed",),
+            )
         accounts = []
         owned_subaccount_ids = set()
         source_accounts = []
@@ -112,8 +127,8 @@ class CrewReadAdapter:
         return NormalizedAccount(
             external_id=source["id"],
             name=str(source.get("displayName") or "Crew account"),
-            account_type="checking",
-            balance=sum(float(item.get("overallBalance") or 0) for item in source.get("subaccounts") or []) / 100,
+            account_type="fallback",
+            balance=0,
             is_active=True,
             source_updated_at=self._observed_at,
         )
@@ -144,6 +159,7 @@ class CrewReadAdapter:
         for source_account in source_accounts:
             account_id = source_account["id"]
             cursor = None
+            seen_cursors = set()
             while True:
                 try:
                     data = self._client.execute(
@@ -154,7 +170,7 @@ class CrewReadAdapter:
                 except Exception:
                     errors.append("transaction page unavailable")
                     break
-                account = data.get("account")
+                account = data.get("account") if isinstance(data, dict) else None
                 if not isinstance(account, dict):
                     errors.append("transaction page malformed")
                     break
@@ -174,12 +190,22 @@ class CrewReadAdapter:
                 if not isinstance(page_info, dict):
                     errors.append("transaction page malformed")
                     break
-                if not page_info.get("hasNextPage"):
-                    break
-                cursor = page_info.get("endCursor")
-                if not isinstance(cursor, str) or not cursor:
+                has_next_page = page_info.get("hasNextPage")
+                if not isinstance(has_next_page, bool):
                     errors.append("transaction page malformed")
                     break
+                if not has_next_page:
+                    break
+                next_cursor = page_info.get("endCursor")
+                if (
+                    not isinstance(next_cursor, str)
+                    or not next_cursor
+                    or next_cursor in seen_cursors
+                ):
+                    errors.append("transaction page malformed")
+                    break
+                seen_cursors.add(next_cursor)
+                cursor = next_cursor
         return transactions, errors
 
     @staticmethod
@@ -208,15 +234,16 @@ class CrewReadAdapter:
             for endpoint in endpoints
         ):
             relation_hint = f"crew-transfer:{transfer_id}"
+        status = str(source.get("status") or source.get("type") or "unknown")
         return NormalizedTransaction(
             external_id=external_id,
             account_external_id=account_external_id,
             amount=float(source.get("amount") or 0) / 100,
             occurred_at=occurred_at,
             description=str(source.get("description") or source.get("title") or "Crew transaction"),
-            status=str(source.get("status") or source.get("type") or "unknown"),
+            status=status,
             merchant=source.get("matchingName"),
             raw_description=source.get("memo") or source.get("externalMemo"),
-            source_updated_at=occurred_at,
+            source_updated_at=f"{occurred_at}#{_TRANSACTION_STATUS_REVISIONS.get(status.lower(), 0):02d}",
             relation_hint=relation_hint,
         )
