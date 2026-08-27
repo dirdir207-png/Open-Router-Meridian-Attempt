@@ -17,6 +17,7 @@ from flask import (
     render_template,
     request,
     send_from_directory,
+    url_for,
 )
 from flask_login import (
     LoginManager,
@@ -2606,6 +2607,19 @@ def create_bill_action(name, amount, frequency_key, day_of_month, match_string=N
         return {"error": str(e)}
 
 # --- ROUTES ---
+
+# --- MERIDIAN SHELL ---
+
+MERIDIAN_WORKSPACES = ("today", "plan", "activity", "accounts")
+
+@app.route('/meridian')
+@login_required
+def meridian():
+    """Meridian responsive application shell (Today / Plan / Activity / Accounts)."""
+    workspace = request.args.get('workspace', 'today')
+    if workspace not in MERIDIAN_WORKSPACES:
+        return redirect(url_for('meridian'))
+    return render_template('meridian/index.html', active_workspace=workspace)
 
 # --- AUTHENTICATION ROUTES ---
 @app.route('/login')

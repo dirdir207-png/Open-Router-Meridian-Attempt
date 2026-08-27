@@ -1,0 +1,55 @@
+/* Meridian motion primitives — short springs, continuity, restraint.
+   Nonessential movement is disabled for reduced-motion users. */
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-workspace-section]:not([hidden]) {
+    animation: m-section-enter var(--m-motion-slow) var(--m-ease-out);
+  }
+
+  @keyframes m-section-enter {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .m-nav-item {
+    transition: background-color var(--m-motion-fast) var(--m-ease-out),
+      color var(--m-motion-fast) var(--m-ease-out),
+      transform var(--m-motion-fast) var(--m-ease-spring);
+  }
+
+  .m-nav-item:active {
+    transform: scale(0.96);
+  }
+
+  .m-sheet[data-open] {
+    animation: m-sheet-rise var(--m-motion-base) var(--m-ease-out);
+  }
+
+  @keyframes m-sheet-rise {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

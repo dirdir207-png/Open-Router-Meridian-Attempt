@@ -1,0 +1,61 @@
+{# Meridian responsive application shell.
+   Standalone template: it deliberately does not load the legacy app bundle. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Meridian</title>
+  <link rel="icon" type="image/png" href="/static/images/favicon.png">
+  <meta name="theme-color" content="#f6f4ef">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/meridian/tokens.css">
+  <link rel="stylesheet" href="/static/css/meridian/shell.css">
+  <link rel="stylesheet" href="/static/css/meridian/motion.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <div class="m-shell" data-meridian-shell>
+    {% include 'meridian/partials/navigation.html' %}
+
+    <header class="m-topbar" data-topbar>
+      <span class="m-brand m-brand--compact">
+        M
+        <span class="m-topbar-title">Meridian</span>
+      </span>
+    </header>
+
+    <main id="main" class="m-main" data-workspace-canvas tabindex="-1">
+      {% for name, label, subline in [
+        ('today', 'Today', 'What can I safely spend now?'),
+        ('plan', 'Plan', 'Commitments and how they get funded.'),
+        ('activity', 'Activity', 'Every transaction in one ledger.'),
+        ('accounts', 'Accounts', 'Structure: accounts, cards, family, connections.')
+      ] %}
+      <section
+        id="workspace-{{ name }}"
+        class="m-workspace"
+        data-workspace-section="{{ name }}"
+        aria-labelledby="workspace-heading-{{ name }}"
+        {% if active_workspace != name %}hidden{% endif %}
+      >
+        <h1 class="m-workspace-heading" id="workspace-heading-{{ name }}">{{ label }}</h1>
+        <p class="m-workspace-subline">{{ subline }}</p>
+        <div data-workspace-content="{{ name }}">
+          <p class="m-empty-note">This workspace is arriving with the next slice.</p>
+        </div>
+      </section>
+      {% endfor %}
+    </main>
+
+    <aside class="m-inspector" data-inspector-rail aria-label="Details" hidden>
+      {# Filled by later slices: transaction inspector, contextual advisor rail. #}
+    </aside>
+  </div>
+
+  <script type="module" src="/static/js/meridian/shell.js"></script>
+</body>
+</html>
