@@ -97,9 +97,16 @@ Because AI assisted development, preserve evidence of human direction, selection
 - Task 1 is complete and independently approved. Production uses Gunicorn; dependency audit, configured lint, Docker artifact identity, CI, and browser smoke gates pass.
 - Task 2 is complete after two review rounds. Financial actions are atomically claimed before external execution; expiry races cannot overwrite claims; uncertain outcomes require manual verification and are never automatically retried.
 - Task 3 is complete after one review round. Meridian has transactional, append-only, resumable migrations plus immutable provider-neutral account and transaction read models with freshness precedence, provenance integrity, stable cursor pagination, and concurrent-startup coverage.
-- The verified suite currently reports 139 passed and 2 skipped tests, with configured Ruff clean.
-- Reviewed work through Task 3 is pushed to GitHub on `feat/meridian-implementation` after the archival checkpoint is published.
-- No merge, deployment, or production financial mutation has been performed.
+- Task 4 is complete with hardening rounds: Crew reads normalize into the Meridian graph (cents→currency, redaction, transfer hints), idempotent sync with partial-failure freshness preservation, provenance and freshness hardening.
+- Task 5 is complete with hardening rounds: stable `/api/meridian/*` read APIs (today, accounts, activity with cursor pagination, transaction detail) behind login, stable error objects, provider-scoped freshness, canonical activity cursors, and timestamp canonicalization moved into versioned migration 004 with quarantine flags and resume-safe reruns.
+- Task 6 is complete: Editorial Wealth design tokens (independent light/dark), responsive shell (72px rail / canvas / inspector on desktop, identity bar + safe-area dock on mobile), URL-persisted workspaces, accessibility primitives, verified at 1440×900 and 390×844.
+- Task 7 is complete: Today composition (dominant safe-to-spend area with explicit unavailable state and explanation inputs) and the Activity ledger (local-date grouping, signed amounts, cursor pagination that never disturbs existing rows, account filter, loading/empty/error states).
+- Task 8 is complete: transaction inspector with complete detail context, explicit empty states for classification/recurrence/transfers/notes, provider mark and freshness, desktop side panel vs mobile full-screen dialog, URL-addressable selection, focus restoration, and advisor context metadata for the next slices.
+- Slice 1 release gate passed on 2026-08-27: Ruff clean, full suite green (204 passed + browser skips), `meridian:slice1` image built and serving via Gunicorn, and all 16 browser tests pass against the containerized build with a fresh database.
+- The verified suite currently reports 205+ tests passing locally, with configured Ruff clean.
+- All work through Task 8 plus the gate fix is pushed to GitHub on `feat/meridian-implementation`.
+- No merge to `main`, deployment, or production financial mutation has been performed. The remaining Slice 1 manual step is the owner-observed read-only verification against real Crew data.
+- Next: Slice 2 — Task 9 (Commitment domain and legacy migration preview), then funding rules (Task 10), schedule proposals (Task 11), and the Plan workspace (Task 12).
 
 ## Binding safety rules
 
