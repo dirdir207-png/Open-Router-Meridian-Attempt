@@ -28,6 +28,7 @@ def get_activity(
         else {
             "transaction_ids": [transaction.id for transaction in transactions],
             "include_all_connections": True,
+            "include_all_transaction_links": True,
         }
     )
     return {

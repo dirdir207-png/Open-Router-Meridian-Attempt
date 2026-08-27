@@ -452,6 +452,7 @@ class FinancialRepository:
         account_ids: Optional[Sequence[int]] = None,
         transaction_ids: Optional[Sequence[int]] = None,
         include_all_connections: bool = False,
+        include_all_transaction_links: bool = False,
     ) -> ProviderFreshnessScope:
         """Return provider state and whether selected records lack a connection."""
         if account_ids is not None and transaction_ids is not None:
@@ -465,6 +466,14 @@ class FinancialRepository:
                 "SELECT connection_id FROM financial_accounts "
                 f"WHERE id IN ({placeholders})"
             )
+        elif transaction_ids is not None and include_all_transaction_links:
+            selected_connections_sql = (
+                "SELECT account.connection_id "
+                "FROM financial_transactions AS financial_transaction "
+                "JOIN financial_accounts AS account "
+                "ON account.id = financial_transaction.account_id"
+            )
+            parameters = ()
         elif transaction_ids is not None and selected_ids:
             placeholders = ", ".join("?" for _ in transaction_ids)
             selected_connections_sql = (

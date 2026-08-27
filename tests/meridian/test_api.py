@@ -239,6 +239,34 @@ def test_unfiltered_reads_treat_unlinked_returned_records_as_stale(api_client, p
     assert response.get_json()["data_freshness"]["status"] == "stale"
 
 
+def test_unfiltered_activity_scans_unlinked_transactions_beyond_first_page(api_client):
+    client, repository = api_client
+    linked_account = _complete_connection(repository)
+    unlinked_account = repository.upsert_account(
+        provider="crew",
+        external_id="unlinked-later-checking",
+        name="Unlinked later checking",
+        account_type="checking",
+        balance=100.0,
+        source_updated_at="2026-08-26T08:00:00Z",
+    )
+    repository.upsert_transaction(
+        provider="crew",
+        external_id="unlinked-later-coffee",
+        account_id=unlinked_account.id,
+        amount=-3.0,
+        occurred_at="2026-08-26T08:00:00Z",
+        description="Later page coffee",
+        status="posted",
+    )
+
+    response = client.get("/api/meridian/activity", query_string={"limit": 1})
+
+    assert response.status_code == 200
+    assert response.get_json()["transactions"][0]["account_id"] == linked_account.id
+    assert response.get_json()["data_freshness"]["status"] == "stale"
+
+
 def test_filtered_empty_activity_uses_the_requested_account_provider_freshness(api_client):
     client, repository = api_client
     account = _complete_connection(repository, include_transaction=False)

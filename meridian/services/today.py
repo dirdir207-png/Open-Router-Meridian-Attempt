@@ -43,6 +43,7 @@ def data_freshness(
     account_ids: Optional[Sequence[int]] = None,
     transaction_ids: Optional[Sequence[int]] = None,
     include_all_connections: bool = False,
+    include_all_transaction_links: bool = False,
     now: Optional[datetime] = None,
 ) -> dict[str, Optional[str]]:
     """Describe whether a scope comes from a complete, current provider graph."""
@@ -50,6 +51,7 @@ def data_freshness(
         account_ids=account_ids,
         transaction_ids=transaction_ids,
         include_all_connections=include_all_connections,
+        include_all_transaction_links=include_all_transaction_links,
     )
     connections = scope.connections
     if not connections:
