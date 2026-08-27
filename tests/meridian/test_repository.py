@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -393,6 +394,96 @@ def test_transaction_pagination_emits_canonical_utc_cursor_for_offset_input(repo
     first_page, cursor = repository.list_transactions(limit=1)
     second_page, _ = repository.list_transactions(limit=1, cursor=cursor)
 
-    assert first_page[0].occurred_at == "2026-08-27T08:00:00Z"
+    assert first_page[0].occurred_at == "2026-08-27T08:00:00.000000Z"
     assert cursor is not None
     assert [item.external_id for item in second_page] == ["first"]
+
+
+def test_transaction_ordering_uses_fixed_width_fractional_utc_storage(repository):
+    account = repository.upsert_account(
+        provider="crew",
+        external_id="fraction-account",
+        name="Fraction account",
+        account_type="checking",
+        balance=100.0,
+    )
+    for external_id, occurred_at in (
+        ("whole", "2026-08-27T08:00:00Z"),
+        ("tenth", "2026-08-27T08:00:00.1Z"),
+        ("eleventh", "2026-08-27T08:00:00.11Z"),
+    ):
+        repository.upsert_transaction(
+            provider="crew",
+            external_id=external_id,
+            account_id=account.id,
+            amount=-1.0,
+            occurred_at=occurred_at,
+            description=external_id,
+            status="posted",
+        )
+
+    records, _ = repository.list_transactions(limit=10)
+
+    assert [record.external_id for record in records] == [
+        "eleventh",
+        "tenth",
+        "whole",
+    ]
+    assert [record.occurred_at for record in records] == [
+        "2026-08-27T08:00:00.110000Z",
+        "2026-08-27T08:00:00.100000Z",
+        "2026-08-27T08:00:00.000000Z",
+    ]
+
+
+def test_repository_backfills_legacy_offset_timestamp_before_emitting_cursor(tmp_path):
+    db_path = tmp_path / "legacy-cursor.db"
+    repository = FinancialRepository(str(db_path))
+    account = repository.upsert_account(
+        provider="crew",
+        external_id="legacy-account",
+        name="Legacy account",
+        account_type="checking",
+        balance=100.0,
+    )
+    repository.upsert_transaction(
+        provider="crew",
+        external_id="newer-transaction",
+        account_id=account.id,
+        amount=-1.0,
+        occurred_at="2026-08-27T09:00:00Z",
+        description="Newer",
+        status="posted",
+    )
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO financial_transactions (
+                account_id, provider, external_id, amount, currency,
+                occurred_at, description, status, source_updated_at, synced_at,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                account.id,
+                "crew",
+                "legacy-offset-transaction",
+                -2.0,
+                "USD",
+                "2026-08-27T08:00:00.11+00:00",
+                "Legacy",
+                "posted",
+                "2026-08-27T08:00:00Z#11",
+                "2026-08-27T09:00:00Z",
+                "2026-08-27T09:00:00Z",
+                "2026-08-27T09:00:00Z",
+            ),
+        )
+
+    upgraded = FinancialRepository(str(db_path))
+    first_page, cursor = upgraded.list_transactions(limit=1)
+    second_page, _ = upgraded.list_transactions(limit=1, cursor=cursor)
+
+    assert first_page[0].occurred_at == "2026-08-27T09:00:00.000000Z"
+    assert second_page[0].occurred_at == "2026-08-27T08:00:00.110000Z"
+    assert second_page[0].source_updated_at == "2026-08-27T08:00:00Z#11"

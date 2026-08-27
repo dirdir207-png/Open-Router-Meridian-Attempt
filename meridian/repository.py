@@ -38,7 +38,7 @@ class ProviderFreshnessScope:
 
 
 _CANONICAL_OCCURRED_AT = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$"
 )
 
 
@@ -87,9 +87,7 @@ def _canonical_occurred_at(value: str) -> str:
         raise ValueError("occurred_at must be a timezone-aware timestamp") from exc
     if parsed.tzinfo is None:
         raise ValueError("occurred_at must be a timezone-aware timestamp")
-    if _CANONICAL_OCCURRED_AT.fullmatch(value) is not None:
-        return value
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _decode_cursor(cursor: str) -> tuple[str, int]:
@@ -123,6 +121,25 @@ class FinancialRepository:
     def __init__(self, db_path: str):
         self._db_path = db_path
         run_migrations(db_path)
+        self._backfill_occurred_at()
+
+    def _backfill_occurred_at(self) -> None:
+        """Canonicalize rows written before fixed-width cursor keys existed."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, occurred_at FROM financial_transactions"
+            ).fetchall()
+            updates = []
+            for row in rows:
+                canonical = _canonical_occurred_at(row["occurred_at"])
+                if canonical != row["occurred_at"]:
+                    updates.append((canonical, row["id"]))
+            if updates:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.executemany(
+                    "UPDATE financial_transactions SET occurred_at = ? WHERE id = ?",
+                    updates,
+                )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._db_path, timeout=30)
