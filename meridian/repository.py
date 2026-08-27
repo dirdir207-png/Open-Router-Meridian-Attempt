@@ -379,6 +379,15 @@ class FinancialRepository:
             next_cursor = _encode_cursor(last.occurred_at, last.id)
         return records, next_cursor
 
+    def get_transaction(self, transaction_id: int) -> Optional[TransactionRecord]:
+        """Return one normalized transaction by its local, opaque Meridian id."""
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT {_TRANSACTION_COLUMNS} FROM financial_transactions WHERE id = ?",
+                (transaction_id,),
+            ).fetchone()
+        return self._transaction_from_row(row) if row is not None else None
+
     @staticmethod
     def _account_from_row(row: sqlite3.Row) -> AccountRecord:
         values = dict(row)

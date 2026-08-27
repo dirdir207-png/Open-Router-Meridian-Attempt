@@ -65,6 +65,7 @@ from crew.health import CredentialHealthService
 from crew.proposals import ProposalError, build_transfer_proposal
 from crew.propose_key import get_or_create_local_key
 from crew.renewal import GuidedRenewalService, sanitize_status_payload
+from meridian.api import meridian_api
 from meridian.providers.crew import CrewReadAdapter
 from meridian.repository import FinancialRepository
 from meridian.sync import sync_provider
@@ -88,6 +89,8 @@ def _no_store_critical(response):
 URL = "https://api.trycrew.com/willow/graphql"
 # In app.py
 DB_FILE = os.environ.get("DB_FILE", "savings_data.db")
+app.config["MERIDIAN_REPOSITORY_FACTORY"] = lambda: FinancialRepository(DB_FILE)
+app.register_blueprint(meridian_api, url_prefix="/api/meridian")
 
 def get_or_create_secret_key():
     """Get secret key from database, or generate and save a new one"""
