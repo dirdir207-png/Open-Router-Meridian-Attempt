@@ -27,6 +27,15 @@ class ProviderConnectionFreshness:
     last_successful_at: Optional[str]
     source_updated_at: tuple[Optional[str], ...]
 
+
+@dataclass(frozen=True)
+class ProviderFreshnessScope:
+    """Credential-free provider state and linkage completeness for one read."""
+
+    connections: tuple[ProviderConnectionFreshness, ...]
+    has_unlinked_records: bool
+
+
 _ACCOUNT_COLUMNS = (
     "id, provider, external_id, name, account_type, balance, currency, "
     "available_balance, is_active, source_updated_at, synced_at, created_at, "
@@ -414,51 +423,72 @@ class FinancialRepository:
             ).fetchone()
         return self._transaction_from_row(row) if row is not None else None
 
-    def list_connection_freshness(
+    def get_freshness_scope(
         self,
         *,
         account_ids: Optional[Sequence[int]] = None,
         transaction_ids: Optional[Sequence[int]] = None,
-    ) -> list[ProviderConnectionFreshness]:
-        """Return complete-sync markers and account source times for a read scope."""
+        include_all_connections: bool = False,
+    ) -> ProviderFreshnessScope:
+        """Return provider state and whether selected records lack a connection."""
         if account_ids is not None and transaction_ids is not None:
             raise ValueError("Specify account_ids or transaction_ids, not both")
-        if account_ids is not None and not account_ids:
-            return []
-        if transaction_ids is not None and not transaction_ids:
-            return []
-
-        parameters: list[object] = []
-        if account_ids is not None:
+        selected_ids = tuple(account_ids or transaction_ids or ())
+        selected_records = account_ids is not None or transaction_ids is not None
+        parameters: tuple[object, ...] = tuple(selected_ids)
+        if account_ids is not None and selected_ids:
             placeholders = ", ".join("?" for _ in account_ids)
-            scope = (
-                "SELECT DISTINCT connection_id FROM financial_accounts "
-                f"WHERE id IN ({placeholders}) AND connection_id IS NOT NULL"
+            selected_connections_sql = (
+                "SELECT connection_id FROM financial_accounts "
+                f"WHERE id IN ({placeholders})"
             )
-            parameters.extend(account_ids)
-        elif transaction_ids is not None:
+        elif transaction_ids is not None and selected_ids:
             placeholders = ", ".join("?" for _ in transaction_ids)
-            scope = (
-                "SELECT DISTINCT account.connection_id FROM financial_transactions AS financial_transaction "
+            selected_connections_sql = (
+                "SELECT account.connection_id FROM financial_transactions AS financial_transaction "
                 "JOIN financial_accounts AS account ON account.id = financial_transaction.account_id "
-                f"WHERE financial_transaction.id IN ({placeholders}) "
-                "AND account.connection_id IS NOT NULL"
+                f"WHERE financial_transaction.id IN ({placeholders})"
             )
-            parameters.extend(transaction_ids)
         else:
-            scope = "SELECT id AS connection_id FROM provider_connections"
+            selected_connections_sql = None
 
         with self._connect() as connection:
+            connection_ids: set[int] = set()
+            has_unlinked_records = False
+            if selected_connections_sql is not None:
+                selected_rows = connection.execute(
+                    selected_connections_sql, parameters
+                ).fetchall()
+                has_unlinked_records = any(
+                    row["connection_id"] is None for row in selected_rows
+                )
+                connection_ids.update(
+                    int(row["connection_id"])
+                    for row in selected_rows
+                    if row["connection_id"] is not None
+                )
+            if include_all_connections or not selected_records:
+                connection_ids.update(
+                    int(row["id"])
+                    for row in connection.execute(
+                        "SELECT id FROM provider_connections"
+                    ).fetchall()
+                )
+            if not connection_ids:
+                return ProviderFreshnessScope(
+                    connections=(), has_unlinked_records=has_unlinked_records
+                )
+            placeholders = ", ".join("?" for _ in connection_ids)
             rows = connection.execute(
                 f"""
                 SELECT connection.id, connection.provider, connection.status,
                        connection.last_successful_at, account.source_updated_at
                 FROM provider_connections AS connection
-                JOIN ({scope}) AS scope ON scope.connection_id = connection.id
                 LEFT JOIN financial_accounts AS account ON account.connection_id = connection.id
+                WHERE connection.id IN ({placeholders})
                 ORDER BY connection.id ASC, account.id ASC
                 """,
-                tuple(parameters),
+                tuple(sorted(connection_ids)),
             ).fetchall()
 
         grouped: dict[int, dict[str, object]] = {}
@@ -474,16 +504,33 @@ class FinancialRepository:
                 },
             )
             current["source_updated_at"].append(row["source_updated_at"])
-        return [
-            ProviderConnectionFreshness(
-                connection_id=connection_id,
-                provider=values["provider"],
-                status=values["status"],
-                last_successful_at=values["last_successful_at"],
-                source_updated_at=tuple(values["source_updated_at"]),
-            )
-            for connection_id, values in grouped.items()
-        ]
+        return ProviderFreshnessScope(
+            connections=tuple(
+                ProviderConnectionFreshness(
+                    connection_id=connection_id,
+                    provider=values["provider"],
+                    status=values["status"],
+                    last_successful_at=values["last_successful_at"],
+                    source_updated_at=tuple(values["source_updated_at"]),
+                )
+                for connection_id, values in grouped.items()
+            ),
+            has_unlinked_records=has_unlinked_records,
+        )
+
+    def list_connection_freshness(
+        self,
+        *,
+        account_ids: Optional[Sequence[int]] = None,
+        transaction_ids: Optional[Sequence[int]] = None,
+    ) -> list[ProviderConnectionFreshness]:
+        """Return provider freshness records for the requested record scope."""
+        return list(
+            self.get_freshness_scope(
+                account_ids=account_ids,
+                transaction_ids=transaction_ids,
+            ).connections
+        )
 
     @staticmethod
     def _account_from_row(row: sqlite3.Row) -> AccountRecord:

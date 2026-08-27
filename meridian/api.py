@@ -116,6 +116,7 @@ def accounts():
             "data_freshness": data_freshness(
                 repository,
                 account_ids=[account.id for account in records],
+                include_all_connections=True,
             ),
         }
     )

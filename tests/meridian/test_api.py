@@ -44,6 +44,58 @@ def api_client(monkeypatch, tmp_path):
     return client, repository
 
 
+def _complete_connection(repository, *, provider="crew", include_transaction=True):
+    now = datetime.now(timezone.utc).isoformat()
+    run = repository.begin_sync_run(
+        provider=provider,
+        connection_external_id=f"{provider}-household",
+        connection_name=provider.title(),
+    )
+    account = repository.upsert_account(
+        provider=provider,
+        external_id=f"{provider}-checking",
+        name=f"{provider.title()} checking",
+        account_type="checking",
+        balance=100.0,
+        connection_id=run.connection_id,
+        source_updated_at=now,
+    )
+    if include_transaction:
+        repository.upsert_transaction(
+            provider=provider,
+            external_id=f"{provider}-coffee",
+            account_id=account.id,
+            amount=-3.0,
+            occurred_at=now,
+            description="Coffee",
+            status="posted",
+            source_updated_at=now,
+        )
+    repository.finish_sync_run(
+        run.id,
+        status="complete",
+        accounts_synced=1,
+        transactions_synced=int(include_transaction),
+        errors=0,
+    )
+    return account
+
+
+def _partial_connection_without_records(repository, *, provider="simplefin"):
+    run = repository.begin_sync_run(
+        provider=provider,
+        connection_external_id=f"{provider}-household",
+        connection_name=provider.title(),
+    )
+    repository.finish_sync_run(
+        run.id,
+        status="partial",
+        accounts_synced=0,
+        transactions_synced=0,
+        errors=1,
+    )
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -132,6 +184,105 @@ def test_meridian_activity_rejects_invalid_pagination_with_a_stable_error(api_cl
         "message": "limit must be an integer between 1 and 200.",
         "recovery_action": "Use a limit between 1 and 200 and try again.",
     }
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/meridian/today",
+        "/api/meridian/accounts",
+        "/api/meridian/activity",
+    ],
+)
+def test_unfiltered_reads_include_partial_providers_without_records(api_client, path):
+    client, repository = api_client
+    _complete_connection(repository)
+    _partial_connection_without_records(repository)
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.get_json()["data_freshness"]["status"] == "stale"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/meridian/today",
+        "/api/meridian/accounts",
+        "/api/meridian/activity",
+    ],
+)
+def test_unfiltered_reads_treat_unlinked_returned_records_as_stale(api_client, path):
+    client, repository = api_client
+    account = repository.upsert_account(
+        provider="crew",
+        external_id="unlinked-checking",
+        name="Unlinked checking",
+        account_type="checking",
+        balance=100.0,
+        source_updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    repository.upsert_transaction(
+        provider="crew",
+        external_id="unlinked-coffee",
+        account_id=account.id,
+        amount=-3.0,
+        occurred_at=datetime.now(timezone.utc).isoformat(),
+        description="Coffee",
+        status="posted",
+    )
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.get_json()["data_freshness"]["status"] == "stale"
+
+
+def test_filtered_empty_activity_uses_the_requested_account_provider_freshness(api_client):
+    client, repository = api_client
+    account = _complete_connection(repository, include_transaction=False)
+
+    response = client.get(
+        "/api/meridian/activity", query_string={"account_id": account.id}
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["transactions"] == []
+    assert response.get_json()["data_freshness"]["status"] == "fresh"
+
+
+def test_filtered_empty_activity_reports_partial_requested_account_as_stale(api_client):
+    client, repository = api_client
+    run = repository.begin_sync_run(
+        provider="simplefin",
+        connection_external_id="simplefin-household",
+        connection_name="SimpleFin",
+    )
+    account = repository.upsert_account(
+        provider="simplefin",
+        external_id="simplefin-checking",
+        name="SimpleFin checking",
+        account_type="checking",
+        balance=100.0,
+        connection_id=run.connection_id,
+        source_updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    repository.finish_sync_run(
+        run.id,
+        status="partial",
+        accounts_synced=1,
+        transactions_synced=0,
+        errors=1,
+    )
+
+    response = client.get(
+        "/api/meridian/activity", query_string={"account_id": account.id}
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["transactions"] == []
+    assert response.get_json()["data_freshness"]["status"] == "stale"
 
 
 def _cursor(payload):

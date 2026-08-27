@@ -42,14 +42,19 @@ def data_freshness(
     *,
     account_ids: Optional[Sequence[int]] = None,
     transaction_ids: Optional[Sequence[int]] = None,
+    include_all_connections: bool = False,
     now: Optional[datetime] = None,
 ) -> dict[str, Optional[str]]:
     """Describe whether a scope comes from a complete, current provider graph."""
-    connections = repository.list_connection_freshness(
+    scope = repository.get_freshness_scope(
         account_ids=account_ids,
         transaction_ids=transaction_ids,
+        include_all_connections=include_all_connections,
     )
+    connections = scope.connections
     if not connections:
+        if scope.has_unlinked_records:
+            return {"status": "stale", "last_updated_at": None}
         return {"status": "unavailable", "last_updated_at": None}
 
     current_time = now or datetime.now(timezone.utc)
@@ -82,7 +87,7 @@ def data_freshness(
     valid_sources = len(source_timestamps) == len(source_values) and all(
         timestamp <= current_time for timestamp, _ in source_timestamps
     )
-    if not complete or not valid_sources:
+    if scope.has_unlinked_records or not complete or not valid_sources:
         return {
             "status": "stale",
             "last_updated_at": _last_trustworthy_update(connections, now=current_time),
@@ -145,6 +150,7 @@ def build_today(
         "data_freshness": data_freshness(
             repository,
             account_ids=[account.id for account in accounts],
+            include_all_connections=True,
             now=now,
         ),
     }

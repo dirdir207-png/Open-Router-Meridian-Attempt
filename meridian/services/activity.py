@@ -22,14 +22,18 @@ def get_activity(
         cursor=cursor,
         account_id=account_id,
     )
+    freshness_kwargs = (
+        {"account_ids": [account_id]}
+        if account_id is not None
+        else {
+            "transaction_ids": [transaction.id for transaction in transactions],
+            "include_all_connections": True,
+        }
+    )
     return {
         "transactions": transactions,
         "next_cursor": next_cursor,
-        "data_freshness": data_freshness(
-            repository,
-            transaction_ids=[transaction.id for transaction in transactions],
-            now=now,
-        ),
+        "data_freshness": data_freshness(repository, **freshness_kwargs, now=now),
     }
 
 
