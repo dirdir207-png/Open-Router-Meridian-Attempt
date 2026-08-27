@@ -1,6 +1,4 @@
 import os
-import urllib.error
-import urllib.request
 
 import pytest
 
@@ -14,22 +12,9 @@ OWNER_PASSWORD = "meridian-owner-2026"
 
 
 def _setup_module():
-    """Register the single-tenant owner once per database; tolerate reruns."""
-    body = (
-        '{"username":"owner","email":"owner@meridian.local",'
-        f'"password":"{OWNER_PASSWORD}"'.encode()
-        + b"}"
-    )
-    request = urllib.request.Request(
-        f"{APP_URL}/api/auth/register",
-        data=body,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(request) as response:
-            assert response.status == 200
-    except urllib.error.HTTPError as error:
-        assert error.code == 403, f"Unexpected registration outcome: {error.code}"
+    from tests.browser.conftest import ensure_owner
+
+    ensure_owner()
 
 
 def _shell_page(browser, viewport):

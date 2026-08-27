@@ -12,6 +12,9 @@ OWNER_PASSWORD = "meridian-owner-2026"
 
 
 def _authed_page(browser, viewport=DESKTOP_VIEWPORT):
+    from tests.browser.conftest import ensure_owner
+
+    ensure_owner()
     context = browser.new_context(viewport=viewport)
     response = context.request.post(
         f"{APP_URL}/api/auth/login",
