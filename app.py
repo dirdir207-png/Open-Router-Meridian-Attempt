@@ -65,6 +65,9 @@ from crew.health import CredentialHealthService
 from crew.proposals import ProposalError, build_transfer_proposal
 from crew.propose_key import get_or_create_local_key
 from crew.renewal import GuidedRenewalService, sanitize_status_payload
+from meridian.providers.crew import CrewReadAdapter
+from meridian.repository import FinancialRepository
+from meridian.sync import sync_provider
 
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -761,6 +764,24 @@ crew_credential_provider = StoredBearerTokenProvider(get_crew_bearer_token)
 crew_client = CrewClient(crew_credential_provider, endpoint=URL, timeout_seconds=15)
 crew_health_service = CredentialHealthService(crew_client)
 
+
+def sync_crew_snapshot():
+    """Mirror Crew reads into Meridian without affecting legacy API responses."""
+    try:
+        report = sync_provider(CrewReadAdapter(crew_client), FinancialRepository(DB_FILE))
+    except Exception:
+        app.logger.warning("Meridian Crew sync could not complete")
+        return None
+    app.logger.info(
+        "Meridian Crew sync provider=%s status=%s accounts=%d transactions=%d errors=%d",
+        report.provider,
+        report.status,
+        report.accounts_synced,
+        report.transactions_synced,
+        report.errors,
+    )
+    return report
+
 def store_crew_credential(value):
     """Persist a renewed Crew credential through the same path as manual saves."""
     conn = sqlite3.connect(DB_FILE)
@@ -1230,6 +1251,7 @@ def get_financial_data():
         if not results["checking"]:
             return {"error": "Checking account not found"}
 
+        sync_crew_snapshot()
         return results
 
     except Exception as e:

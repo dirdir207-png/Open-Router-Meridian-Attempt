@@ -240,6 +240,89 @@ class FinancialRepository:
         assert row is not None
         return self._transaction_from_row(row)
 
+    def begin_sync_run(
+        self,
+        *,
+        provider: str,
+        connection_external_id: str,
+        connection_name: str,
+    ) -> int:
+        """Record an attempted provider read without advancing freshness."""
+        timestamp = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO provider_connections (
+                    provider, external_id, display_name, status, last_attempted_at
+                ) VALUES (?, ?, ?, 'syncing', ?)
+                ON CONFLICT(provider, external_id) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    status = 'syncing',
+                    last_attempted_at = excluded.last_attempted_at,
+                    updated_at = excluded.last_attempted_at
+                """,
+                (provider, connection_external_id, connection_name, timestamp),
+            )
+            connection_row = connection.execute(
+                "SELECT id FROM provider_connections WHERE provider = ? AND external_id = ?",
+                (provider, connection_external_id),
+            ).fetchone()
+            assert connection_row is not None
+            cursor = connection.execute(
+                """
+                INSERT INTO provider_sync_runs (connection_id, provider, status, started_at)
+                VALUES (?, ?, 'running', ?)
+                """,
+                (connection_row["id"], provider, timestamp),
+            )
+        return int(cursor.lastrowid)
+
+    def finish_sync_run(
+        self,
+        run_id: int,
+        *,
+        status: str,
+        accounts_synced: int,
+        transactions_synced: int,
+        errors: int,
+    ) -> None:
+        """Finalize a run and advance connection freshness only when complete."""
+        if status not in {"complete", "partial", "failed"}:
+            raise ValueError("Invalid sync status")
+        timestamp = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = connection.execute(
+                "SELECT connection_id FROM provider_sync_runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+            if run is None:
+                raise ValueError("Unknown sync run")
+            connection.execute(
+                """
+                UPDATE provider_sync_runs
+                SET status = ?, completed_at = ?, accounts_synced = ?,
+                    transactions_synced = ?, errors = ?
+                WHERE id = ?
+                """,
+                (status, timestamp, accounts_synced, transactions_synced, errors, run_id),
+            )
+            if status == "complete":
+                connection.execute(
+                    """
+                    UPDATE provider_connections
+                    SET status = 'healthy', last_successful_at = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (timestamp, timestamp, run["connection_id"]),
+                )
+            else:
+                connection.execute(
+                    "UPDATE provider_connections SET status = ?, updated_at = ? WHERE id = ?",
+                    (status, timestamp, run["connection_id"]),
+                )
+
     def list_accounts(self) -> list[AccountRecord]:
         with self._connect() as connection:
             rows = connection.execute(

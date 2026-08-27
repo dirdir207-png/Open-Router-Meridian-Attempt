@@ -18,6 +18,7 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
     assert run_migrations(str(db_path)) == [
         "001_financial_graph.sql",
         "002_financial_integrity.sql",
+        "003_provider_sync_runs.sql",
     ]
     assert run_migrations(str(db_path)) == []
 
@@ -38,6 +39,7 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
     assert migrations == [
         ("001", "001_financial_graph.sql"),
         ("002", "002_financial_integrity.sql"),
+        ("003", "003_provider_sync_runs.sql"),
     ]
     assert legacy_row == ("2026-08-26", 1234.56)
     assert {
@@ -45,6 +47,7 @@ def test_migrations_are_idempotent_and_preserve_legacy_rows(tmp_path):
         "financial_accounts",
         "financial_transactions",
         "transaction_relations",
+        "provider_sync_runs",
     } <= tables
 
 
